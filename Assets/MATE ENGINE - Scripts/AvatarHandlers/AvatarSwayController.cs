@@ -1,8 +1,11 @@
 using System;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 using UnityEngine;
+using MateEngine.Platform;
 
+/// <summary>
+/// Controls avatar sway based on window velocity or mouse movement
+/// Now uses platform abstraction layer for cross-platform support
+/// </summary>
 public class AvatarSwayController : MonoBehaviour
 {
     [Header("References")]
@@ -85,20 +88,24 @@ public class AvatarSwayController : MonoBehaviour
     Quaternion lastLegLAddWorld = Quaternion.identity;
     Quaternion lastLegRAddWorld = Quaternion.identity;
 
-#if UNITY_STANDALONE_WIN
+    // Platform services
+    private IWindowService windowService;
     IntPtr hwnd;
     Vector2Int prevWinPos;
-#endif
 
     void Awake()
     {
         draggingHash = Animator.StringToHash(draggingParam);
         windowSitHash = Animator.StringToHash(windowSitParam);
         prevMousePos = Input.mousePosition;
-#if UNITY_STANDALONE_WIN
-        hwnd = Process.GetCurrentProcess().MainWindowHandle;
-        if (hwnd != IntPtr.Zero) prevWinPos = GetWindowPosition(hwnd);
-#endif
+        
+        // Initialize platform services
+        windowService = PlatformServiceLocator.GetWindowService();
+        hwnd = windowService.GetMainWindowHandle();
+        if (hwnd != IntPtr.Zero) 
+        {
+            prevWinPos = GetWindowPosition(hwnd);
+        }
     }
 
     void OnDisable()
@@ -121,7 +128,6 @@ public class AvatarSwayController : MonoBehaviour
         float dt = Time.deltaTime;
         Vector2 delta = Vector2.zero;
 
-#if UNITY_STANDALONE_WIN
         if (useWindowVelocity && hwnd != IntPtr.Zero && active)
         {
             Vector2Int wp = GetWindowPosition(hwnd);
@@ -129,7 +135,7 @@ public class AvatarSwayController : MonoBehaviour
             prevWinPos = wp;
             delta = new Vector2(d.x, d.y);
         }
-#endif
+        
         if (delta == Vector2.zero && fallbackToMouse && dragging)
         {
             Vector2 m = Input.mousePosition;
@@ -330,16 +336,9 @@ public class AvatarSwayController : MonoBehaviour
         }
     }
 
-#if UNITY_STANDALONE_WIN
-    [StructLayout(LayoutKind.Sequential)]
-    struct RECT { public int left; public int top; public int right; public int bottom; }
-
-    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-
-    static Vector2Int GetWindowPosition(IntPtr hWnd)
+    Vector2Int GetWindowPosition(IntPtr hWnd)
     {
-        GetWindowRect(hWnd, out RECT r);
+        PlatformRect r = windowService.GetWindowRect();
         return new Vector2Int(r.left, r.top);
     }
-#endif
 }

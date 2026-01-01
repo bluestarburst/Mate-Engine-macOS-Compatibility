@@ -1,11 +1,14 @@
 using UnityEngine;
 using System;
-using System.Runtime.InteropServices;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine.UI;
+using MateEngine.Platform;
 
-
+/// <summary>
+/// Handles big screen alarm and timer features
+/// Now uses platform abstraction layer for cross-platform support
+/// </summary>
 public class AvatarBigScreenTimer : MonoBehaviour
 {
     [Header("Bubble Material")]
@@ -62,15 +65,6 @@ public class AvatarBigScreenTimer : MonoBehaviour
 
     private LLMUnitySamples.Bubble alarmBubble;
     private Coroutine streamCoroutine;
-
-    [DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out POINT lpPoint);
-
-    [DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vKey);
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct POINT { public int X; public int Y; }
 
     private readonly Queue<string> pendingEvents = new Queue<string>();
 
@@ -217,19 +211,14 @@ public class AvatarBigScreenTimer : MonoBehaviour
     private bool lastGlobalMouseDown = false;
     private bool IsGlobalUserInput()
     {
-        bool mouseDown = (GetAsyncKeyState(0x01) & 0x8000) != 0;
+        // Use Unity's Input system instead of Windows API
+        bool mouseDown = Input.GetMouseButton(0) || Input.GetMouseButton(1) || Input.GetMouseButton(2);
         bool mouseClick = mouseDown && !lastGlobalMouseDown;
         lastGlobalMouseDown = mouseDown;
 
-        bool keyPressed = false;
-        for (int key = 0x08; key <= 0xFE; key++)
-        {
-            if ((GetAsyncKeyState(key) & 0x8000) != 0)
-            {
-                keyPressed = true;
-                break;
-            }
-        }
+        // Check for any key press
+        bool keyPressed = Input.anyKey;
+        
         return mouseClick || keyPressed;
     }
 
