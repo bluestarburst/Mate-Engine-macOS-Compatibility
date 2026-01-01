@@ -116,8 +116,10 @@ public class AvatarWindowHandler : MonoBehaviour
     float _guardRadiusSq;
     void Start()
     {
+#if UNITY_STANDALONE_WIN
         unityHWND = Process.GetCurrentProcess().MainWindowHandle;
         _currentPid = GetCurrentProcessId();
+#endif
         animator = GetComponent<Animator>();
         controller = GetComponent<AvatarAnimatorController>();
         if (targetCamera == null) targetCamera = Camera.main;
@@ -130,7 +132,9 @@ public class AvatarWindowHandler : MonoBehaviour
             for (int i = 0; i < pre; i++) EnsureOtherQuad(i);
             SetTargetQuadActive(false); SetOtherQuadsActive(0);
         }
+#if UNITY_STANDALONE_WIN
         SetTopMost(SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data.isTopmost : true);
+#endif
         _nextEnumTime = 0f;
         _prevLossyScale = transform.lossyScale;
         _lastSnapTopY = int.MinValue;
@@ -326,6 +330,7 @@ public class AvatarWindowHandler : MonoBehaviour
             _skinnedCached = true;
         }
     }
+#if UNITY_STANDALONE_WIN
     bool IsEffectivelyTransparentWindow(IntPtr hWnd, System.Text.StringBuilder cls)
     {
         long ex = GetWindowLongPtr(hWnd, GWL_EXSTYLE).ToInt64();
@@ -358,7 +363,9 @@ public class AvatarWindowHandler : MonoBehaviour
         snappedHWND = IntPtr.Zero;
         seatCalibrated = false;
         if (animator != null) { animator.SetBool("isWindowSit", false); animator.SetBool("isTaskbarSit", false); }
+#if UNITY_STANDALONE_WIN
         SetTopMost(SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data.isTopmost : true);
+#endif
         SetTargetQuadActive(false); SetOtherQuadsActive(0);
         _guard = _latch = 0;
         activeOccluders.Clear();
@@ -944,6 +951,7 @@ public class AvatarWindowHandler : MonoBehaviour
         }
         return false;
     }
+#endif
 
 #if UNITY_STANDALONE_WIN
     [DllImport("kernel32.dll")] static extern uint GetCurrentProcessId();
