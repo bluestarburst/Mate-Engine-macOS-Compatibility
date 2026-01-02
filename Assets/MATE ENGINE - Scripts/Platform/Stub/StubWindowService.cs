@@ -22,6 +22,9 @@ namespace MateEngine.Platform.Stub
         }
         
         public bool SetWindowPosition(IntPtr hWnd, int x, int y, int width, int height, SetWindowFlags flags) => false;
+        public bool MoveWindow(IntPtr hWnd, int x, int y, int width, int height, bool repaint) => false;
+        public Vector2Int ClientToScreen(IntPtr hWnd, Vector2Int clientPoint) => clientPoint;
+        public bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags) => false;
         public bool ShowWindow(IntPtr hWnd, ShowWindowCommand cmd) => false;
         public bool IsWindowVisible(IntPtr hWnd) => false;
         public bool IsWindowMinimized(IntPtr hWnd) => false;

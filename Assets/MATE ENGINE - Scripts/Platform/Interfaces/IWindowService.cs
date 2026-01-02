@@ -17,6 +17,9 @@ namespace MateEngine.Platform
         bool GetWindowRect(IntPtr hWnd, out WindowRect rect);
         bool GetClientRect(IntPtr hWnd, out WindowRect rect);
         bool SetWindowPosition(IntPtr hWnd, int x, int y, int width, int height, SetWindowFlags flags);
+        bool MoveWindow(IntPtr hWnd, int x, int y, int width, int height, bool repaint);
+        Vector2Int ClientToScreen(IntPtr hWnd, Vector2Int clientPoint);
+        bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
         
         // Window State
         bool ShowWindow(IntPtr hWnd, ShowWindowCommand cmd);

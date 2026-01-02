@@ -8,7 +8,19 @@ namespace MateEngine.Platform.Windows
     {
         public IntPtr GetMainWindowHandle()
         {
-            return Kirurobo.WindowController.GetUnityWindowHandle();
+            // Try to get the active/foreground window which should be Unity's main window
+            // In most cases, Unity runs as the foreground application
+            IntPtr hWnd = GetForegroundWindow();
+            
+            // Verify this is actually a valid window
+            if (IsWindow(hWnd))
+            {
+                return hWnd;
+            }
+            
+            // Fallback: return IntPtr.Zero to indicate failure
+            // The consumer should handle this gracefully
+            return IntPtr.Zero;
         }
 
         public IntPtr GetActiveWindow()
@@ -52,6 +64,23 @@ namespace MateEngine.Platform.Windows
         public bool SetWindowPosition(IntPtr hWnd, int x, int y, int width, int height, SetWindowFlags flags)
         {
             return Kirurobo.WinApi.SetWindowPos(hWnd, IntPtr.Zero, x, y, width, height, (uint)flags);
+        }
+
+        public bool MoveWindow(IntPtr hWnd, int x, int y, int width, int height, bool repaint)
+        {
+            return NativeMoveWindow(hWnd, x, y, width, height, repaint);
+        }
+
+        public Vector2Int ClientToScreen(IntPtr hWnd, Vector2Int clientPoint)
+        {
+            Kirurobo.WinApi.POINT pt = new Kirurobo.WinApi.POINT { x = clientPoint.x, y = clientPoint.y };
+            NativeClientToScreen(hWnd, ref pt);
+            return new Vector2Int(pt.x, pt.y);
+        }
+
+        public bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags)
+        {
+            return Kirurobo.WinApi.SetWindowPos(hWnd, hWndInsertAfter, x, y, cx, cy, uFlags);
         }
 
         public bool ShowWindow(IntPtr hWnd, ShowWindowCommand cmd)
@@ -154,15 +183,7 @@ namespace MateEngine.Platform.Windows
 
         public IntPtr GetWindow(IntPtr hWnd, GetWindowCommand cmd)
         {
-            // Use GetAncestor for GW_OWNER
-            if (cmd == GetWindowCommand.GW_OWNER)
-            {
-                return Kirurobo.WinApi.GetAncestor(hWnd, Kirurobo.WinApi.GW_OWNER);
-            }
-            
-            // For other commands, we need to use EnumWindows or similar
-            // This is a simplified implementation
-            return IntPtr.Zero;
+            return NativeGetWindow(hWnd, (uint)cmd);
         }
 
         public bool IsAboveInZOrder(IntPtr hWnd1, IntPtr hWnd2)
@@ -221,6 +242,15 @@ namespace MateEngine.Platform.Windows
         
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]
         private static extern uint NativeGetCurrentProcessId();
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool NativeMoveWindow(IntPtr hWnd, int x, int y, int nWidth, int nHeight, bool bRepaint);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool NativeClientToScreen(IntPtr hWnd, ref Kirurobo.WinApi.POINT lpPoint);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr NativeGetWindow(IntPtr hWnd, uint uCmd);
 
         #endregion
     }

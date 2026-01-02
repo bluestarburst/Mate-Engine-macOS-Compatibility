@@ -187,7 +187,7 @@ public class AvatarHideHandler : MonoBehaviour
 
         int ty = cp.y - cursorOffsetY;
 
-        windowService.SetWindowPosition(unityHWND, tx, ty, windowW, windowH, SetWindowFlags.SWP_NOZORDER);
+        windowService.SetWindowPosition(unityHWND, tx, ty, windowW, windowH, SetWindowFlags.NoZOrder);
         smoothingActive = enableSmoothing;
         velX = velY = 0f;
         snappedAt = Time.unscaledTime;
@@ -214,7 +214,7 @@ public class AvatarHideHandler : MonoBehaviour
         if (!enableSmoothing || !smoothingActive)
         {
             if (curX != targetX || curY != targetY) 
-                windowService.SetWindowPosition(unityHWND, targetX, targetY, w, h, SetWindowFlags.SWP_NOZORDER);
+                windowService.SetWindowPosition(unityHWND, targetX, targetY, w, h, SetWindowFlags.NoZOrder);
             return;
         }
         float dt = Time.unscaledDeltaTime;
@@ -227,7 +227,7 @@ public class AvatarHideHandler : MonoBehaviour
             ix = targetX; iy = targetY; smoothingActive = false; velX = velY = 0f;
         }
         if (ix != curX || iy != curY) 
-            windowService.SetWindowPosition(unityHWND, ix, iy, w, h, SetWindowFlags.SWP_NOZORDER);
+            windowService.SetWindowPosition(unityHWND, ix, iy, w, h, SetWindowFlags.NoZOrder);
     }
 
     Rect GetCurrentMonitorRect(Vector2Int cp)
