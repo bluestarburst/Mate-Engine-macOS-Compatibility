@@ -1,10 +1,15 @@
 using UnityEngine;
 using System;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
+using MateEngine.Platform;
 
 public class DesktopAmbientProbe : MonoBehaviour
 {
+    // Platform Services
+    IScreenCaptureService captureService;
+    IScreenService screenService;
+    IWindowService windowService;
+    
     public Light topLight;
     public Light bottomLight;
     public Light leftLight;
@@ -23,47 +28,16 @@ public class DesktopAmbientProbe : MonoBehaviour
     [Range(0f, 4f)] public float maxColorIntensity = 0.8f;
     [Range(0.5f, 3f)] public float saturationGamma = 1.3f;
 
-#if UNITY_STANDALONE_WIN
+    // Constants used for screen capture operations
     const int SM_XVIRTUALSCREEN = 76;
     const int SM_YVIRTUALSCREEN = 77;
     const int SM_CXVIRTUALSCREEN = 78;
     const int SM_CYVIRTUALSCREEN = 79;
     const int SRCCOPY = 0x00CC0020;
 
-    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
-    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
-    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr hdc);
-    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
-    [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
-    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr hObject);
-    [DllImport("gdi32.dll")] static extern bool StretchBlt(IntPtr hdcDest, int xDest, int yDest, int wDest, int hDest, IntPtr hdcSrc, int xSrc, int ySrc, int wSrc, int hSrc, int rop);
-    [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFO pbmi, uint iUsage, out IntPtr ppvBits, IntPtr hSection, uint dwOffset);
-    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-    [DllImport("user32.dll")] static extern IntPtr GetActiveWindow();
-    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-    [DllImport("user32.dll")] static extern int GetSystemMetrics(int nIndex);
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct RECT { public int left; public int top; public int right; public int bottom; }
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct BITMAPINFOHEADER
-    {
-        public uint biSize; public int biWidth; public int biHeight; public ushort biPlanes; public ushort biBitCount; public uint biCompression; public uint biSizeImage; public int biXPelsPerMeter; public int biYPelsPerMeter; public uint biClrUsed; public uint biClrImportant;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct BITMAPINFO { public BITMAPINFOHEADER bmiHeader; }
-
-    IntPtr deskDC;
-    IntPtr memDC;
-    IntPtr dib;
-    IntPtr dibBits;
-    IntPtr oldObj;
+    // Capture state tracking
     int virtX, virtY, virtW, virtH;
     byte[] pixelBytes;
-#endif
 
     float nextTick;
     Vector3 hsvTop;
@@ -79,18 +53,22 @@ public class DesktopAmbientProbe : MonoBehaviour
 
     void Start()
     {
+        // Get platform services
+        captureService = PlatformServiceLocator.ScreenCaptureService;
+        screenService = PlatformServiceLocator.ScreenService;
+        windowService = PlatformServiceLocator.WindowService;
+        
         TryLoadToggle();
-#if UNITY_STANDALONE_WIN
-        InitCapture();
-#endif
+        if (captureService != null)
+        {
+            InitCapture();
+        }
         inited = true;
     }
 
     void OnDestroy()
     {
-#if UNITY_STANDALONE_WIN
         ReleaseCapture();
-#endif
     }
 
     void TryLoadToggle()
@@ -120,64 +98,58 @@ public class DesktopAmbientProbe : MonoBehaviour
         if (Time.unscaledTime >= nextTick)
         {
             nextTick = Time.unscaledTime + 1f / Mathf.Max(1f, captureHz);
-#if UNITY_STANDALONE_WIN
-            if (EnsureCaptureValid()) CaptureAndAnalyze();
-#endif
+            if (captureService != null && EnsureCaptureValid()) CaptureAndAnalyze();
         }
         SmoothTowardsTargets(Time.unscaledDeltaTime);
         ApplyToLights();
     }
 
-#if UNITY_STANDALONE_WIN
     bool EnsureCaptureValid()
     {
-        int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        if (screenService == null) return false;
+        int vx = screenService.GetSystemMetric(0); // SM_XVIRTUALSCREEN
+        int vy = screenService.GetSystemMetric(1); // SM_YVIRTUALSCREEN
+        int vw = screenService.GetSystemMetric(2); // SM_CXVIRTUALSCREEN
+        int vh = screenService.GetSystemMetric(3); // SM_CYVIRTUALSCREEN
         if (vw <= 0 || vh <= 0) return false;
         if (vw != virtW || vh != virtH || vx != virtX || vy != virtY) InitCapture();
-        return memDC != IntPtr.Zero && dib != IntPtr.Zero && dibBits != IntPtr.Zero;
+        return captureService != null && pixelBytes != null && pixelBytes.Length > 0;
     }
 
     void InitCapture()
     {
         ReleaseCapture();
-        virtX = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        virtY = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        virtW = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        virtH = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-        deskDC = GetDC(IntPtr.Zero);
-        memDC = CreateCompatibleDC(deskDC);
-        BITMAPINFO bmi = new BITMAPINFO();
-        bmi.bmiHeader.biSize = (uint)Marshal.SizeOf(typeof(BITMAPINFOHEADER));
-        bmi.bmiHeader.biWidth = captureWidth;
-        bmi.bmiHeader.biHeight = -captureHeight;
-        bmi.bmiHeader.biPlanes = 1;
-        bmi.bmiHeader.biBitCount = 32;
-        bmi.bmiHeader.biCompression = 0;
-        dib = CreateDIBSection(memDC, ref bmi, 0, out dibBits, IntPtr.Zero, 0);
-        oldObj = SelectObject(memDC, dib);
+        if (captureService == null || screenService == null) return;
+        
+        virtX = screenService.GetSystemMetric(0); // SM_XVIRTUALSCREEN
+        virtY = screenService.GetSystemMetric(1); // SM_YVIRTUALSCREEN
+        virtW = screenService.GetSystemMetric(2); // SM_CXVIRTUALSCREEN
+        virtH = screenService.GetSystemMetric(3); // SM_CYVIRTUALSCREEN
+        
         pixelBytes = new byte[captureWidth * captureHeight * 4];
+        
+        // Service will manage internal GDI/bitmap resources
+        captureService.InitializeCapture(captureWidth, captureHeight);
     }
 
     void ReleaseCapture()
     {
-        if (memDC != IntPtr.Zero && oldObj != IntPtr.Zero) SelectObject(memDC, oldObj);
-        if (dib != IntPtr.Zero) { DeleteObject(dib); dib = IntPtr.Zero; }
-        if (memDC != IntPtr.Zero) { DeleteDC(memDC); memDC = IntPtr.Zero; }
-        if (deskDC != IntPtr.Zero) { ReleaseDC(IntPtr.Zero, deskDC); deskDC = IntPtr.Zero; }
-        dibBits = IntPtr.Zero;
+        if (captureService != null)
+        {
+            captureService.ReleaseCapture();
+        }
+        pixelBytes = null;
     }
 
     IntPtr GetUnityHwnd()
     {
-        IntPtr h = GetActiveWindow();
+        if (windowService == null) return IntPtr.Zero;
+        IntPtr h = windowService.GetActiveWindow();
         if (h != IntPtr.Zero) return h;
-        h = GetForegroundWindow();
+        h = windowService.GetForegroundWindow();
         if (h != IntPtr.Zero)
         {
-            GetWindowThreadProcessId(h, out uint pid);
+            uint pid = windowService.GetWindowProcessId(h);
             var p = Process.GetCurrentProcess();
             if (pid == (uint)p.Id) return h;
         }
@@ -186,19 +158,28 @@ public class DesktopAmbientProbe : MonoBehaviour
 
     void CaptureAndAnalyze()
     {
-        StretchBlt(memDC, 0, 0, captureWidth, captureHeight, deskDC, virtX, virtY, virtW, virtH, SRCCOPY);
-        Marshal.Copy(dibBits, pixelBytes, 0, pixelBytes.Length);
+        if (captureService == null || pixelBytes == null) return;
+        if (!captureService.CaptureScreen(virtX, virtY, virtW, virtH, out IntPtr dibBits))
+            return;
+        
+        // Copy pixel data from service
+        System.Runtime.InteropServices.Marshal.Copy(dibBits, pixelBytes, 0, pixelBytes.Length);
 
-        RECT wr = new RECT();
         var hwnd = GetUnityHwnd();
-        bool haveWnd = hwnd != IntPtr.Zero && GetWindowRect(hwnd, out wr);
+        WindowRect wr = new WindowRect();
+        bool haveWnd = false;
+        if (hwnd != IntPtr.Zero && windowService != null)
+        {
+            haveWnd = windowService.GetWindowRect(hwnd, out wr);
+        }
+        
         int wx0 = 0, wy0 = 0, wx1 = 0, wy1 = 0;
         if (haveWnd)
         {
-            wx0 = Mathf.RoundToInt(((wr.left - virtX) / (float)virtW) * captureWidth);
-            wy0 = Mathf.RoundToInt(((wr.top - virtY) / (float)virtH) * captureHeight);
-            wx1 = Mathf.RoundToInt(((wr.right - virtX) / (float)virtW) * captureWidth);
-            wy1 = Mathf.RoundToInt(((wr.bottom - virtY) / (float)virtH) * captureHeight);
+            wx0 = Mathf.RoundToInt(((wr.Left - virtX) / (float)virtW) * captureWidth);
+            wy0 = Mathf.RoundToInt(((wr.Top - virtY) / (float)virtH) * captureHeight);
+            wx1 = Mathf.RoundToInt(((wr.Right - virtX) / (float)virtW) * captureWidth);
+            wy1 = Mathf.RoundToInt(((wr.Bottom - virtY) / (float)virtH) * captureHeight);
         }
         int band = Mathf.Max(1, Mathf.RoundToInt(bandThicknessPx * (captureHeight / (float)Mathf.Max(1, virtH))));
         int margin = Mathf.Max(0, Mathf.RoundToInt(excludeMarginPx * (captureHeight / (float)Mathf.Max(1, virtH))));
@@ -314,7 +295,6 @@ public class DesktopAmbientProbe : MonoBehaviour
         float fb = bb / (255f * count);
         return new Color(fr, fg, fb, 1f);
     }
-#endif
 
     void SmoothTowardsTargets(float dt)
     {

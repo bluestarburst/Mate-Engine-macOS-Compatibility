@@ -203,12 +203,31 @@ namespace MateEngine.Platform.Windows
             return new Rect(minX, minY, maxX - minX, maxY - minY);
         }
 
+        public int GetSystemMetric(int nIndex)
+        {
+            // Map high-level indices to Windows metric constants
+            return nIndex switch
+            {
+                0 => GetSystemMetrics(SM_XVIRTUALSCREEN),      // X offset
+                1 => GetSystemMetrics(SM_YVIRTUALSCREEN),      // Y offset
+                2 => GetSystemMetrics(SM_CXVIRTUALSCREEN),     // Width
+                3 => GetSystemMetrics(SM_CYVIRTUALSCREEN),     // Height
+                _ => GetSystemMetrics(nIndex)                  // Direct pass-through for other constants
+            };
+        }
+
         #region P/Invoke Declarations
         
         private const uint MONITOR_DEFAULTTONULL = 0x00000000;
         private const uint MONITOR_DEFAULTTOPRIMARY = 0x00000001;
         private const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
         private const uint MONITORINFOF_PRIMARY = 1;
+        
+        // System metrics constants
+        private const int SM_XVIRTUALSCREEN = 76;
+        private const int SM_YVIRTUALSCREEN = 77;
+        private const int SM_CXVIRTUALSCREEN = 78;
+        private const int SM_CYVIRTUALSCREEN = 79;
         
         [StructLayout(LayoutKind.Sequential)]
         private struct POINT
@@ -250,6 +269,9 @@ namespace MateEngine.Platform.Windows
         
         [DllImport("user32.dll")]
         private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumDelegate lpfnEnum, IntPtr dwData);
+        
+        [DllImport("user32.dll")]
+        private static extern int GetSystemMetrics(int nIndex);
         
         [DllImport("user32.dll")]
         private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);

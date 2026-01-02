@@ -37,5 +37,18 @@ namespace MateEngine.Platform.Stub
         {
             return new Rect(0, 0, Screen.width, Screen.height);
         }
+
+        public int GetSystemMetric(int nIndex)
+        {
+            // Return default stub values based on metric index
+            return nIndex switch
+            {
+                0 => 0,                    // X offset
+                1 => 0,                    // Y offset
+                2 => Screen.width,         // Width
+                3 => Screen.height,        // Height
+                _ => 0                     // Other metrics
+            };
+        }
     }
 }

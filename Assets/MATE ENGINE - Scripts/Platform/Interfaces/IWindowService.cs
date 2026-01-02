@@ -10,6 +10,8 @@ namespace MateEngine.Platform
     {
         // Window Handle
         IntPtr GetMainWindowHandle();
+        IntPtr GetActiveWindow();
+        IntPtr GetForegroundWindow();
         
         // Position and Size
         bool GetWindowRect(IntPtr hWnd, out WindowRect rect);

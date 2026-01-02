@@ -17,6 +17,9 @@ namespace MateEngine.Platform
         
         // Virtual Desktop
         Rect GetVirtualDesktopBounds();
+        
+        // System Metrics
+        int GetSystemMetric(int nIndex);
     }
 
     public struct MonitorInfo

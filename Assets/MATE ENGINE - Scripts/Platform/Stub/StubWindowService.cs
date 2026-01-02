@@ -6,6 +6,8 @@ namespace MateEngine.Platform.Stub
     public class StubWindowService : IWindowService
     {
         public IntPtr GetMainWindowHandle() => IntPtr.Zero;
+        public IntPtr GetActiveWindow() => IntPtr.Zero;
+        public IntPtr GetForegroundWindow() => IntPtr.Zero;
         
         public bool GetWindowRect(IntPtr hWnd, out WindowRect rect)
         {

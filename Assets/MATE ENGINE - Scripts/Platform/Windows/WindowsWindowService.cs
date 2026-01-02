@@ -11,6 +11,16 @@ namespace MateEngine.Platform.Windows
             return Kirurobo.WindowController.GetUnityWindowHandle();
         }
 
+        public IntPtr GetActiveWindow()
+        {
+            return GetActiveWindowImpl();
+        }
+
+        public IntPtr GetForegroundWindow()
+        {
+            return GetForegroundWindowImpl();
+        }
+
         public bool GetWindowRect(IntPtr hWnd, out WindowRect rect)
         {
             Kirurobo.WinApi.RECT winRect;
@@ -196,6 +206,12 @@ namespace MateEngine.Platform.Windows
         #region P/Invoke Declarations
 
         private const int DWMWA_CLOAKED = 14;
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetActiveWindowImpl();
+        
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindowImpl();
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool NativeGetLayeredWindowAttributes(IntPtr hwnd, out uint pcrKey, out byte pbAlpha, out uint pdwFlags);
