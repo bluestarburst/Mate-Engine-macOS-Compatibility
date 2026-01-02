@@ -2,8 +2,8 @@ using UnityEngine;
 using System.Collections;
 using System.Diagnostics;
 using System.Runtime;
-using System.Runtime.InteropServices;
 using System;
+using MateEngine.Platform;
 
 public class MemoryTrim : MonoBehaviour
 {
@@ -71,13 +71,29 @@ public class MemoryTrim : MonoBehaviour
 
     static void TrimWorkingSet()
     {
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
-        EmptyWorkingSet(Process.GetCurrentProcess().Handle);
-#endif
+        // Use platform service to trim working set if available
+        var platformService = PlatformServiceLocator.PlatformService;
+        if (platformService.IsSupported(PlatformFeature.MemoryManagement))
+        {
+            // Trim working set using Windows API if supported
+            try
+            {
+                IntPtr currentProcess = Process.GetCurrentProcess().Handle;
+                EmptyWorkingSet(currentProcess);
+            }
+            catch
+            {
+                // Silently fail on non-Windows platforms
+            }
+        }
     }
 
+    // P/Invoke declaration for Windows only
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
-    [DllImport("psapi.dll")]
+    [System.Runtime.InteropServices.DllImport("psapi.dll")]
     static extern bool EmptyWorkingSet(IntPtr hProcess);
+#else
+    // No-op stub for non-Windows platforms
+    static bool EmptyWorkingSet(IntPtr hProcess) => true;
 #endif
 }

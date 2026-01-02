@@ -1,7 +1,7 @@
 using UnityEngine;
 using System;
-using System.Runtime.InteropServices;
 using System.Diagnostics;
+using MateEngine.Platform;
 
 public class AvatarHideHandler : MonoBehaviour
 {
@@ -22,6 +22,10 @@ public class AvatarHideHandler : MonoBehaviour
     Transform rightHand;
     Camera cam;
 
+    // Platform services
+    IWindowService windowService;
+    IScreenService screenService;
+
     enum Side { None, Left, Right }
     Side snappedSide = Side.None;
 
@@ -34,9 +38,16 @@ public class AvatarHideHandler : MonoBehaviour
 
     void Start()
     {
-#if UNITY_STANDALONE_WIN
-        unityHWND = Process.GetCurrentProcess().MainWindowHandle;
-#endif
+        // Get platform services
+        windowService = PlatformServiceLocator.WindowService;
+        screenService = PlatformServiceLocator.ScreenService;
+
+        // Get window handle - only works on Windows
+        if (windowService != null)
+        {
+            unityHWND = windowService.GetMainWindowHandle();
+        }
+
         animator = GetComponent<Animator>();
         controller = GetComponent<AvatarAnimatorController>();
         if (animator != null && animator.isHuman && animator.avatar != null)
@@ -56,18 +67,16 @@ public class AvatarHideHandler : MonoBehaviour
 
     void Update()
     {
-#if !UNITY_STANDALONE_WIN
-        return;
-#else
-        if (unityHWND == IntPtr.Zero || animator == null || controller == null) return;
+        // Only proceed on Windows or if services are available
+        if (unityHWND == IntPtr.Zero || animator == null || controller == null || windowService == null || screenService == null) return;
 
         if (controller.isDragging && !wasDragging)
         {
-            if (GetWindowRect(unityHWND, out RECT wr) && GetCursorPos(out POINT cp))
+            if (windowService.GetWindowRect(unityHWND, out WindowRect wr) && screenService.GetCursorPosition(out Vector2Int cp))
             {
-                windowW = Math.Max(1, wr.Right - wr.Left);
-                windowH = Math.Max(1, wr.Bottom - wr.Top);
-                cursorOffsetY = cp.y - wr.Top;
+                windowW = Math.Max(1, (int)wr.Width);
+                windowH = Math.Max(1, (int)wr.Height);
+                cursorOffsetY = (int)(cp.y - wr.Top);
                 smoothingActive = false;
                 velX = velY = 0f;
             }
@@ -75,17 +84,17 @@ public class AvatarHideHandler : MonoBehaviour
 
         if (controller.isDragging)
         {
-            if (!GetCursorPos(out POINT cp)) { wasDragging = controller.isDragging; return; }
-            if (!GetWindowRect(unityHWND, out RECT wrCur)) { wasDragging = controller.isDragging; return; }
-            RECT mon = GetCurrentMonitorRect(cp);
+            if (!screenService.GetCursorPosition(out Vector2Int cp)) { wasDragging = controller.isDragging; return; }
+            if (!windowService.GetWindowRect(unityHWND, out WindowRect wrCur)) { wasDragging = controller.isDragging; return; }
+            Rect mon = GetCurrentMonitorRect(cp);
 
             int anchorLeftDesk = GetAnchorDesktopX(Side.Left);
             int anchorRightDesk = GetAnchorDesktopX(Side.Right);
-            if (anchorLeftDesk < 0) anchorLeftDesk = wrCur.Left + Math.Max(1, (wrCur.Right - wrCur.Left) / 2);
-            if (anchorRightDesk < 0) anchorRightDesk = wrCur.Left + Math.Max(1, (wrCur.Right - wrCur.Left) / 2);
+            if (anchorLeftDesk < 0) anchorLeftDesk = (int)wrCur.Left + Math.Max(1, (int)wrCur.Width / 2);
+            if (anchorRightDesk < 0) anchorRightDesk = (int)wrCur.Left + Math.Max(1, (int)wrCur.Width / 2);
 
-            bool nearLeft = anchorLeftDesk - mon.Left <= Math.Max(1, snapThresholdPx);
-            bool nearRight = mon.Right - anchorRightDesk <= Math.Max(1, snapThresholdPx);
+            bool nearLeft = anchorLeftDesk - (int)mon.x <= Math.Max(1, snapThresholdPx);
+            bool nearRight = (int)(mon.x + mon.width) - anchorRightDesk <= Math.Max(1, snapThresholdPx);
 
             if (snappedSide == Side.None)
             {
@@ -96,26 +105,26 @@ public class AvatarHideHandler : MonoBehaviour
             {
                 if (Time.unscaledTime >= snappedAt + unsnapGraceTime)
                 {
-                    if (snappedSide == Side.Left && (cp.x - mon.Left) > Math.Max(1, unsnapThresholdPx)) Unsnap();
-                    else if (snappedSide == Side.Right && (mon.Right - cp.x) > Math.Max(1, unsnapThresholdPx)) Unsnap();
+                    if (snappedSide == Side.Left && (cp.x - (int)mon.x) > Math.Max(1, unsnapThresholdPx)) Unsnap();
+                    else if (snappedSide == Side.Right && ((int)(mon.x + mon.width) - cp.x) > Math.Max(1, unsnapThresholdPx)) Unsnap();
                 }
             }
 
             if (snappedSide != Side.None)
             {
-                if (!GetWindowRect(unityHWND, out RECT wr2)) { wasDragging = controller.isDragging; return; }
-                RECT monNow = GetCurrentMonitorRect(cp);
+                if (!windowService.GetWindowRect(unityHWND, out WindowRect wr2)) { wasDragging = controller.isDragging; return; }
+                Rect monNow = GetCurrentMonitorRect(cp);
 
                 int anchorDesk = GetAnchorDesktopX(snappedSide);
-                if (anchorDesk < 0) anchorDesk = wr2.Left + Math.Max(1, (wr2.Right - wr2.Left) / 2);
-                int anchorWinX = Mathf.Clamp(anchorDesk - wr2.Left, 0, Math.Max(1, wr2.Right - wr2.Left));
+                if (anchorDesk < 0) anchorDesk = (int)wr2.Left + Math.Max(1, (int)wr2.Width / 2);
+                int anchorWinX = Mathf.Clamp(anchorDesk - (int)wr2.Left, 0, Math.Max(1, (int)wr2.Width));
 
-                int desiredAnchorDesk = snappedSide == Side.Left ? monNow.Left + edgeInsetPx : monNow.Right - edgeInsetPx;
+                int desiredAnchorDesk = snappedSide == Side.Left ? (int)monNow.x + edgeInsetPx : (int)(monNow.x + monNow.width) - edgeInsetPx;
                 int tx = desiredAnchorDesk - anchorWinX;
 
                 int ty = cp.y - cursorOffsetY;
 
-                MoveSmooth(wr2.Left, wr2.Top, tx, ty, wr2.Right - wr2.Left, wr2.Bottom - wr2.Top);
+                MoveSmooth((int)wr2.Left, (int)wr2.Top, tx, ty, (int)wr2.Width, (int)wr2.Height);
                 if (keepTopmostWhileSnapped) SetTopMost(true);
             }
         }
@@ -123,64 +132,62 @@ public class AvatarHideHandler : MonoBehaviour
         {
             if (snappedSide != Side.None)
             {
-                if (!GetWindowRect(unityHWND, out RECT wr)) return;
-                RECT mon = GetMonitorFromWindow(unityHWND);
+                if (!windowService.GetWindowRect(unityHWND, out WindowRect wr)) return;
+                Rect mon = GetMonitorFromWindow(unityHWND);
 
                 int anchorDesk = GetAnchorDesktopX(snappedSide);
-                if (anchorDesk < 0) anchorDesk = wr.Left + Math.Max(1, (wr.Right - wr.Left) / 2);
-                int anchorWinX = Mathf.Clamp(anchorDesk - wr.Left, 0, Math.Max(1, wr.Right - wr.Left));
+                if (anchorDesk < 0) anchorDesk = (int)wr.Left + Math.Max(1, (int)wr.Width / 2);
+                int anchorWinX = Mathf.Clamp(anchorDesk - (int)wr.Left, 0, Math.Max(1, (int)wr.Width));
 
-                int desiredAnchorDesk = snappedSide == Side.Left ? mon.Left + edgeInsetPx : mon.Right - edgeInsetPx;
+                int desiredAnchorDesk = snappedSide == Side.Left ? (int)mon.x + edgeInsetPx : (int)(mon.x + mon.width) - edgeInsetPx;
                 int tx = desiredAnchorDesk - anchorWinX;
 
-                int ty = wr.Top;
+                int ty = (int)wr.Top;
 
-                MoveSmooth(wr.Left, wr.Top, tx, ty, wr.Right - wr.Left, wr.Bottom - wr.Top);
+                MoveSmooth((int)wr.Left, (int)wr.Top, tx, ty, (int)wr.Width, (int)wr.Height);
                 if (keepTopmostWhileSnapped) SetTopMost(true);
             }
         }
 
         wasDragging = controller.isDragging;
-#endif
     }
 
-#if UNITY_STANDALONE_WIN
     int GetAnchorDesktopX(Side side)
     {
         Transform t = side == Side.Left ? leftHand : rightHand;
         if (t == null || cam == null) return -1;
-        if (!GetUnityClientRect(out RECT uCli)) return -1;
+        if (!GetUnityClientRect(out Rect uCli)) return -1;
 
         Vector3 sp = cam.WorldToScreenPoint(t.position);
         if (sp.z < 0.01f) return -1;
 
-        float clientW = Mathf.Max(1f, uCli.Right - uCli.Left);
+        float clientW = Mathf.Max(1f, uCli.width);
         float pxW = Mathf.Max(1, cam.pixelWidth);
         float sx = Mathf.Clamp(sp.x, 0, cam.pixelWidth) * (clientW / pxW);
-        int desktopX = uCli.Left + Mathf.RoundToInt(sx);
+        int desktopX = (int)uCli.x + Mathf.RoundToInt(sx);
         return desktopX;
     }
 
-    void SnapTo(Side side, POINT cp, RECT mon)
+    void SnapTo(Side side, Vector2Int cp, Rect mon)
     {
-        if (!GetWindowRect(unityHWND, out RECT wr)) return;
+        if (!windowService.GetWindowRect(unityHWND, out WindowRect wr)) return;
 
-        windowW = Math.Max(1, wr.Right - wr.Left);
-        windowH = Math.Max(1, wr.Bottom - wr.Top);
-        cursorOffsetY = cp.y - wr.Top;
+        windowW = Math.Max(1, (int)wr.Width);
+        windowH = Math.Max(1, (int)wr.Height);
+        cursorOffsetY = cp.y - (int)wr.Top;
         snappedSide = side;
         SetHide(side == Side.Left, side == Side.Right);
 
         int anchorDesk = GetAnchorDesktopX(side);
-        if (anchorDesk < 0) anchorDesk = wr.Left + Math.Max(1, (wr.Right - wr.Left) / 2);
-        int anchorWinX = Mathf.Clamp(anchorDesk - wr.Left, 0, Math.Max(1, wr.Right - wr.Left));
+        if (anchorDesk < 0) anchorDesk = (int)wr.Left + Math.Max(1, (int)wr.Width / 2);
+        int anchorWinX = Mathf.Clamp(anchorDesk - (int)wr.Left, 0, Math.Max(1, (int)wr.Width));
 
-        int desiredAnchorDesk = side == Side.Left ? mon.Left + edgeInsetPx : mon.Right - edgeInsetPx;
+        int desiredAnchorDesk = side == Side.Left ? (int)mon.x + edgeInsetPx : (int)(mon.x + mon.width) - edgeInsetPx;
         int tx = desiredAnchorDesk - anchorWinX;
 
         int ty = cp.y - cursorOffsetY;
 
-        MoveWindow(unityHWND, tx, ty, windowW, windowH, true);
+        windowService.SetWindowPosition(unityHWND, tx, ty, windowW, windowH, SetWindowFlags.SWP_NOZORDER);
         smoothingActive = enableSmoothing;
         velX = velY = 0f;
         snappedAt = Time.unscaledTime;
@@ -206,7 +213,8 @@ public class AvatarHideHandler : MonoBehaviour
     {
         if (!enableSmoothing || !smoothingActive)
         {
-            if (curX != targetX || curY != targetY) MoveWindow(unityHWND, targetX, targetY, w, h, true);
+            if (curX != targetX || curY != targetY) 
+                windowService.SetWindowPosition(unityHWND, targetX, targetY, w, h, SetWindowFlags.SWP_NOZORDER);
             return;
         }
         float dt = Time.unscaledDeltaTime;
@@ -218,91 +226,38 @@ public class AvatarHideHandler : MonoBehaviour
         {
             ix = targetX; iy = targetY; smoothingActive = false; velX = velY = 0f;
         }
-        if (ix != curX || iy != curY) MoveWindow(unityHWND, ix, iy, w, h, true);
+        if (ix != curX || iy != curY) 
+            windowService.SetWindowPosition(unityHWND, ix, iy, w, h, SetWindowFlags.SWP_NOZORDER);
     }
 
-    RECT GetCurrentMonitorRect(POINT cp)
+    Rect GetCurrentMonitorRect(Vector2Int cp)
     {
-        RECT fallback = GetVirtualScreenRect();
-        IntPtr hmon = MonitorFromPoint(cp, MONITOR_DEFAULTTONEAREST);
-        if (hmon == IntPtr.Zero) return fallback;
-        MONITORINFO mi = new MONITORINFO();
-        mi.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
-        if (!GetMonitorInfo(hmon, ref mi)) return fallback;
-        return mi.rcMonitor;
+        MonitorInfo mon = screenService.GetMonitorFromPoint(cp);
+        return mon.MonitorArea;
     }
 
-    RECT GetMonitorFromWindow(IntPtr hwnd)
+    Rect GetMonitorFromWindow(IntPtr hwnd)
     {
-        RECT fallback = GetVirtualScreenRect();
-        IntPtr hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        if (hmon == IntPtr.Zero) return fallback;
-        MONITORINFO mi = new MONITORINFO();
-        mi.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
-        if (!GetMonitorInfo(hmon, ref mi)) return fallback;
-        return mi.rcMonitor;
+        MonitorInfo mon = screenService.GetMonitorFromWindow(hwnd);
+        return mon.MonitorArea;
     }
 
-    RECT GetVirtualScreenRect()
+    bool GetUnityClientRect(out Rect r)
     {
-        RECT r = new RECT();
-        r.Left = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        r.Top = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        r.Right = r.Left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        r.Bottom = r.Top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
-        return r;
-    }
-
-    bool GetUnityClientRect(out RECT r)
-    {
-        r = new RECT();
-        if (!GetClientRect(unityHWND, out RECT client)) return false;
-        POINT p = new POINT { X = 0, Y = 0 };
-        if (!ClientToScreen(unityHWND, ref p)) return false;
-        r.Left = p.X; r.Top = p.Y; r.Right = p.X + client.Right; r.Bottom = p.Y + client.Bottom;
+        r = new Rect();
+        if (!windowService.GetClientRect(unityHWND, out WindowRect client)) return false;
+        
+        // ClientToScreen equivalent - convert client (0,0) to screen coordinates
+        Vector2Int screenPos = new Vector2Int(0, 0);
+        // Since we don't have a direct ClientToScreen, we use GetWindowRect and assume top-left alignment
+        if (!windowService.GetWindowRect(unityHWND, out WindowRect winRect)) return false;
+        
+        r = new Rect((int)winRect.Left, (int)winRect.Top, (int)client.Width, (int)client.Height);
         return true;
     }
 
     void SetTopMost(bool on)
     {
-        SetWindowPos(unityHWND, on ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        windowService.SetTopMost(unityHWND, on);
     }
-
-    [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
-
-    [StructLayout(LayoutKind.Explicit)]
-    struct POINT
-    {
-        [FieldOffset(0)] public int x;
-        [FieldOffset(0)] public int X;
-        [FieldOffset(4)] public int y;
-        [FieldOffset(4)] public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public int dwFlags; }
-
-    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT lpPoint);
-    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-    [DllImport("user32.dll")] static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
-    [DllImport("user32.dll")] static extern int GetSystemMetrics(int nIndex);
-    [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(POINT pt, uint dwFlags);
-    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
-    [DllImport("user32.dll", SetLastError = true)] static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
-    [DllImport("user32.dll", SetLastError = true)] static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-    [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
-    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
-
-    static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
-    static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
-
-    const uint MONITOR_DEFAULTTONEAREST = 2;
-    const uint SWP_NOMOVE = 0x0002;
-    const uint SWP_NOSIZE = 0x0001;
-    const uint SWP_NOACTIVATE = 0x0010;
-
-    const int SM_CXVIRTUALSCREEN = 78;
-    const int SM_CYVIRTUALSCREEN = 79;
-    const int SM_XVIRTUALSCREEN = 76;
-    const int SM_YVIRTUALSCREEN = 77;
-#endif
 }
