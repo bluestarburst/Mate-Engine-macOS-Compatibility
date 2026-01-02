@@ -25,6 +25,8 @@ namespace MateEngine.Platform
         {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
             return new Windows.WindowsWindowService();
+#elif UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
+            return new MacOS.MacOSPlatformService().WindowService;
 #else
             return new Stub.StubWindowService();
 #endif
@@ -34,6 +36,8 @@ namespace MateEngine.Platform
         {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
             return new Windows.WindowsScreenService();
+#elif UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
+            return new MacOS.MacOSScreenService();
 #else
             return new Stub.StubScreenService();
 #endif
@@ -43,6 +47,8 @@ namespace MateEngine.Platform
         {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
             return new Windows.WindowsTransparencyService();
+#elif UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
+            return new MacOS.MacOSTransparencyService();
 #else
             return new Stub.StubTransparencyService();
 #endif
@@ -52,6 +58,8 @@ namespace MateEngine.Platform
         {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
             return new Windows.WindowsSystemTrayService();
+#elif UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
+            return new MacOS.MacOSSystemTrayService();
 #else
             return new Stub.StubSystemTrayService();
 #endif
@@ -61,6 +69,8 @@ namespace MateEngine.Platform
         {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
             return new Windows.WindowsScreenCaptureService();
+#elif UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
+            return new MacOS.MacOSPlatformService().ScreenCaptureService;
 #else
             return new Stub.StubScreenCaptureService();
 #endif
@@ -70,6 +80,8 @@ namespace MateEngine.Platform
         {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
             return new Windows.WindowsPlatformService();
+#elif UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
+            return new MacOS.MacOSPlatformService();
 #else
             return new Stub.StubPlatformService();
 #endif
