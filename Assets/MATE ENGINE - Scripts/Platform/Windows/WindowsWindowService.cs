@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Text;
 using UnityEngine;
 
@@ -8,9 +9,9 @@ namespace MateEngine.Platform.Windows
     {
         public IntPtr GetMainWindowHandle()
         {
-            // Try to get the active/foreground window which should be Unity's main window
-            // In most cases, Unity runs as the foreground application
-            IntPtr hWnd = GetForegroundWindow();
+            // Get the main window handle of the current process
+            // This is more reliable than using GetForegroundWindow() which might return a different window
+            IntPtr hWnd = Process.GetCurrentProcess().MainWindowHandle;
             
             // Verify this is actually a valid window
             if (IsWindow(hWnd))
@@ -18,8 +19,14 @@ namespace MateEngine.Platform.Windows
                 return hWnd;
             }
             
-            // Fallback: return IntPtr.Zero to indicate failure
-            // The consumer should handle this gracefully
+            // Fallback: Try the foreground window if the main window handle failed
+            hWnd = GetForegroundWindow();
+            if (IsWindow(hWnd))
+            {
+                return hWnd;
+            }
+            
+            // No valid window found
             return IntPtr.Zero;
         }
 
@@ -221,7 +228,7 @@ namespace MateEngine.Platform.Windows
 
         public uint GetCurrentProcessId()
         {
-            return NativeGetCurrentProcessId();
+            return (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
         }
 
         #region P/Invoke Declarations
@@ -237,19 +244,19 @@ namespace MateEngine.Platform.Windows
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool NativeGetLayeredWindowAttributes(IntPtr hwnd, out uint pcrKey, out byte pbAlpha, out uint pdwFlags);
         
-        [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true, EntryPoint = "DwmGetWindowAttribute")]
         private static extern int NativeDwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
         
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]
         private static extern uint NativeGetCurrentProcessId();
 
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "MoveWindow")]
         private static extern bool NativeMoveWindow(IntPtr hWnd, int x, int y, int nWidth, int nHeight, bool bRepaint);
 
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "ClientToScreen")]
         private static extern bool NativeClientToScreen(IntPtr hWnd, ref Kirurobo.WinApi.POINT lpPoint);
 
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindow")]
         private static extern IntPtr NativeGetWindow(IntPtr hWnd, uint uCmd);
 
         #endregion

@@ -25,8 +25,6 @@ namespace MateEngine.Platform
         {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
             return new Windows.WindowsWindowService();
-#elif UNITY_STANDALONE_OSX || UNITY_EDITOR_OSX
-            return new MacOS.MacOSPlatformService().WindowService;
 #else
             return new Stub.StubWindowService();
 #endif

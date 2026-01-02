@@ -45,14 +45,18 @@ namespace MateEngine.Platform.MacOS
                 if (statusItem == IntPtr.Zero) return false;
 
                 // Set the title (will be visible)
-                IntPtr nsString = objc_msgSend(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), appName);
+                IntPtr appNamePtr = Marshal.StringToHGlobalAuto(appName);
+                IntPtr nsString = objc_msgSend(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), appNamePtr);
                 objc_msgSend(statusItem, sel_registerName("setTitle:"), nsString);
+                Marshal.FreeHGlobal(appNamePtr);
 
                 // Set tooltip
                 if (!string.IsNullOrEmpty(tooltip))
                 {
-                    IntPtr tooltipString = objc_msgSend(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), tooltip);
+                    IntPtr tooltipPtr = Marshal.StringToHGlobalAuto(tooltip);
+                    IntPtr tooltipString = objc_msgSend(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), tooltipPtr);
                     objc_msgSend(statusItem, sel_registerName("setToolTip:"), tooltipString);
+                    Marshal.FreeHGlobal(tooltipPtr);
                 }
 
                 // Create and set menu
@@ -103,8 +107,10 @@ namespace MateEngine.Platform.MacOS
             {
                 if (statusItem != IntPtr.Zero && !string.IsNullOrEmpty(tooltip))
                 {
-                    IntPtr tooltipString = objc_msgSend(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), tooltip);
+                    IntPtr tooltipPtr = Marshal.StringToHGlobalAuto(tooltip);
+                    IntPtr tooltipString = objc_msgSend(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), tooltipPtr);
                     objc_msgSend(statusItem, sel_registerName("setToolTip:"), tooltipString);
+                    Marshal.FreeHGlobal(tooltipPtr);
                     return true;
                 }
                 return false;
@@ -158,10 +164,13 @@ namespace MateEngine.Platform.MacOS
                     {
                         // Create menu item
                         IntPtr menuItem = objc_msgSend(objc_getClass("NSMenuItem"), sel_registerName("alloc"));
-                        IntPtr labelStr = objc_msgSend(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), label);
+                        IntPtr labelPtr = Marshal.StringToHGlobalAuto(label);
+                        IntPtr labelStr = objc_msgSend(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), labelPtr);
                         
                         menuItem = objc_msgSend(menuItem, sel_registerName("initWithTitle:action:keyEquivalent:"), 
                             labelStr, sel_registerName("menuItemClicked:"), IntPtr.Zero);
+
+                        Marshal.FreeHGlobal(labelPtr);
 
                         if (menuItem != IntPtr.Zero)
                         {
@@ -172,9 +181,11 @@ namespace MateEngine.Platform.MacOS
 
                 // Add Quit option at the end
                 IntPtr quitItem = objc_msgSend(objc_getClass("NSMenuItem"), sel_registerName("alloc"));
-                IntPtr quitStr = objc_msgSend(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), "Quit");
+                IntPtr quitPtr = Marshal.StringToHGlobalAuto("Quit");
+                IntPtr quitStr = objc_msgSend(objc_getClass("NSString"), sel_registerName("stringWithUTF8String:"), quitPtr);
                 quitItem = objc_msgSend(quitItem, sel_registerName("initWithTitle:action:keyEquivalent:"), 
                     quitStr, sel_registerName("terminate:"), IntPtr.Zero);
+                Marshal.FreeHGlobal(quitPtr);
                 objc_msgSend(menu, sel_registerName("addItem:"), quitItem);
             }
             catch (Exception ex)
