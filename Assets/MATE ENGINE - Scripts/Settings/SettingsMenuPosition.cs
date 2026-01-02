@@ -29,6 +29,7 @@ public class SettingsMenuPosition : MonoBehaviour
 
     private IntPtr unityHWND;
 
+#if UNITY_STANDALONE_WIN
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int left, top, right, bottom; }
 
@@ -39,6 +40,10 @@ public class SettingsMenuPosition : MonoBehaviour
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+#else
+    private struct RECT { public int left, top, right, bottom; }
+    private delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData);
+#endif
 
     private readonly List<RECT> monitorRects = new List<RECT>();
     private MonitorEnumProc enumProc;
@@ -49,9 +54,13 @@ public class SettingsMenuPosition : MonoBehaviour
 
     void Start()
     {
+#if UNITY_STANDALONE_WIN
         unityHWND = Process.GetCurrentProcess().MainWindowHandle;
         enumProc = EnumProc;
         RefreshMonitors();
+#else
+        unityHWND = IntPtr.Zero;
+#endif
         foreach (var menu in menus)
         {
             if (!menu.settingsMenu) continue;
@@ -63,6 +72,7 @@ public class SettingsMenuPosition : MonoBehaviour
 
     void Update()
     {
+#if UNITY_STANDALONE_WIN
         if (unityHWND == IntPtr.Zero) return;
 
         monitorTimer += Time.unscaledDeltaTime;
@@ -100,6 +110,7 @@ public class SettingsMenuPosition : MonoBehaviour
                 }
             }
         }
+#endif
     }
 
     bool EnumProc(IntPtr hMonitor, IntPtr hdc, ref RECT lprc, IntPtr data)
@@ -110,12 +121,15 @@ public class SettingsMenuPosition : MonoBehaviour
 
     void RefreshMonitors()
     {
+#if UNITY_STANDALONE_WIN
         monitorRects.Clear();
         EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, enumProc, IntPtr.Zero);
+#endif
     }
 
     RECT GetBestMonitor(RECT win)
     {
+#if UNITY_STANDALONE_WIN
         int idx = 0, maxArea = 0;
         for (int i = 0; i < monitorRects.Count; i++)
         {
@@ -123,6 +137,9 @@ public class SettingsMenuPosition : MonoBehaviour
             if (a > maxArea) { maxArea = a; idx = i; }
         }
         return monitorRects[idx];
+#else
+        return new RECT { left = 0, top = 0, right = Screen.currentResolution.width, bottom = Screen.currentResolution.height };
+#endif
     }
 
     int OverlapArea(RECT a, RECT b)

@@ -48,7 +48,11 @@ public class AvatarTaskbarController : MonoBehaviour
 
     void Start()
     {
+#if UNITY_STANDALONE_WIN
         unityHWND = Process.GetCurrentProcess().MainWindowHandle;
+#else
+        unityHWND = IntPtr.Zero;
+#endif
         animator = avatarAnimator ?? GetComponent<Animator>();
 
         if (attachTarget != null)
@@ -68,6 +72,10 @@ public class AvatarTaskbarController : MonoBehaviour
 
     void Update()
     {
+#if !UNITY_STANDALONE_WIN
+        // Taskbar sitting is Windows-only
+        return;
+#endif
         if (unityHWND == IntPtr.Zero || animator == null) return;
 
         UpdateUnityWindowPosition();
@@ -191,6 +199,7 @@ public class AvatarTaskbarController : MonoBehaviour
     }
 
     #region WinAPI
+#if UNITY_STANDALONE_WIN
     private const int ABM_GETTASKBARPOS = 0x00000005;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -218,5 +227,21 @@ public class AvatarTaskbarController : MonoBehaviour
 
     [DllImport("user32.dll")]
     static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+#else
+    // Stub implementations for non-Windows platforms
+    struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+    
+    bool GetWindowRect(IntPtr hWnd, out RECT lpRect)
+    {
+        lpRect = new RECT();
+        return false;
+    }
+#endif
     #endregion
 }

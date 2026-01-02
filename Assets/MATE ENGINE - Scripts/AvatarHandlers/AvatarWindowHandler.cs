@@ -330,9 +330,10 @@ public class AvatarWindowHandler : MonoBehaviour
             _skinnedCached = true;
         }
     }
-#if UNITY_STANDALONE_WIN
+
     bool IsEffectivelyTransparentWindow(IntPtr hWnd, System.Text.StringBuilder cls)
     {
+#if UNITY_STANDALONE_WIN
         long ex = GetWindowLongPtr(hWnd, GWL_EXSTYLE).ToInt64();
         if ((ex & WS_EX_LAYERED) == 0) return false;
         if (ignoreLayeredClickThrough && (ex & WS_EX_TRANSPARENT) != 0) return true;
@@ -347,11 +348,18 @@ public class AvatarWindowHandler : MonoBehaviour
         if ((st & WS_CAPTION) == 0 && titleLen <= 1) return true;
         if ((st & WS_CAPTION) == 0 && (SBEq(cls, "UnityWndClass") || SBEq(cls, "UnityGUIView"))) return true;
         return false;
+#else
+        return false;
+#endif
     }
     bool IsSameProcessWindow(IntPtr hWnd)
     {
+#if UNITY_STANDALONE_WIN
         GetWindowThreadProcessId(hWnd, out uint pid);
         return pid == _currentPid;
+#else
+        return false;
+#endif
     }
     void ClearSnapAndHide(bool fromUnsnap = false)
     {
@@ -373,6 +381,7 @@ public class AvatarWindowHandler : MonoBehaviour
 
     void UpdateCachedWindows()
     {
+#if UNITY_STANDALONE_WIN
         cachedWindows.Clear();
         EnumWindows((hWnd, lParam) =>
         {
@@ -385,9 +394,11 @@ public class AvatarWindowHandler : MonoBehaviour
             cachedWindows.Add(new WindowEntry { hwnd = hWnd, rect = r, isTaskbar = false });
             return true;
         }, IntPtr.Zero);
+#endif
     }
     void RebuildActiveOccluders()
     {
+#if UNITY_STANDALONE_WIN
         activeOccluders.Clear();
         for (int i = 0; i < cachedWindows.Count && activeOccluders.Count < maxOtherQuads; i++)
         {
@@ -398,15 +409,20 @@ public class AvatarWindowHandler : MonoBehaviour
             if (!(w.isTaskbar || IsAboveInZOrder(w.hwnd, snappedHWND))) continue;
             activeOccluders.Add(w);
         }
+#endif
     }
     bool IsSitEligibleWindow(IntPtr hWnd, RECT r, System.Text.StringBuilder cls)
     {
+#if UNITY_STANDALONE_WIN
         if (GetParent(hWnd) != IntPtr.Zero || GetAncestor(hWnd, GA_ROOT) != hWnd || IsIconic(hWnd) || GetWindowTextLength(hWnd) == 0 || IsCloaked(hWnd)) return false;
         int w = r.Right - r.Left, h = r.Bottom - r.Top;
         if (w < 200 || h < 60) return false;
         if (SBEq(cls, "Progman") || SBEq(cls, "WorkerW") || SBEq(cls, "DV2ControlHost") || SBEq(cls, "MsgrIMEWindowClass")) return false;
         if (SBStartsWith(cls, "#") || SBContains(cls, "Desktop")) return false;
         return true;
+#else
+        return false;
+#endif
     }
     bool IsCloaked(IntPtr hWnd)
     {
@@ -951,6 +967,53 @@ public class AvatarWindowHandler : MonoBehaviour
         }
         return false;
     }
+
+    // Platform-independent struct definitions (available on all platforms)
+    public struct RECT { public int Left, Top, Right, Bottom; }
+    public struct POINT { public int X, Y; }
+    struct WindowEntry { public IntPtr hwnd; public RECT rect; public bool isTaskbar; }
+
+    // Stub implementations for non-Windows platforms
+#if !UNITY_STANDALONE_WIN
+    bool GetWindowRect(IntPtr hWnd, out RECT lpRect) { lpRect = new RECT(); return false; }
+    bool GetClientRect(IntPtr hWnd, out RECT lpRect) { lpRect = new RECT(); return false; }
+    bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint) { return false; }
+    bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint) { return false; }
+    bool IsWindowVisible(IntPtr hWnd) { return false; }
+    void ShowWindow(IntPtr hWnd, int cmdShow) { }
+    bool IsIconic(IntPtr hWnd) { return false; }
+    bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl) { return false; }
+    int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount) { return 0; }
+    IntPtr GetParent(IntPtr hWnd) { return IntPtr.Zero; }
+    IntPtr GetAncestor(IntPtr hwnd, uint gaFlags) { return IntPtr.Zero; }
+    int GetWindowTextLength(IntPtr hWnd) { return 0; }
+    bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam) { return false; }
+    bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags) { return false; }
+    IntPtr GetWindow(IntPtr hWnd, uint uCmd) { return IntPtr.Zero; }
+    IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex) { return IntPtr.Zero; }
+    bool GetLayeredWindowAttributes(IntPtr hwnd, out uint pcrKey, out byte pbAlpha, out uint pdwFlags) { pcrKey = 0; pbAlpha = 0; pdwFlags = 0; return false; }
+    int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute) { pvAttribute = 0; return -1; }
+    uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId) { lpdwProcessId = 0; return 0; }
+    delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    struct WINDOWPLACEMENT { public int length; public int flags; public int showCmd; public POINT ptMinPosition; public POINT ptMaxPosition; public RECT rcNormalPosition; }
+    const uint GA_ROOT = 2;
+    const uint GW_HWNDPREV = 3;
+    const int GWL_STYLE = -16;
+    const int GWL_EXSTYLE = -20;
+    const int WS_CAPTION = 0x00C00000;
+    const int WS_EX_LAYERED = 0x00080000;
+    const int WS_EX_TRANSPARENT = 0x00000020;
+    const int WS_EX_TOOLWINDOW = 0x00000080;
+    const int WS_EX_NOACTIVATE = 0x08000000;
+    const uint LWA_COLORKEY = 0x00000001;
+    const uint LWA_ALPHA = 0x00000002;
+    const int DWMWA_CLOAKED = 14;
+    const int SW_MAXIMIZE = 3;
+    IntPtr HWND_TOPMOST = new IntPtr(-1);
+    IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+    const uint SWP_NOMOVE = 0x0002;
+    const uint SWP_NOSIZE = 0x0001;
+    const uint SWP_NOACTIVATE = 0x0010;
 #endif
 
 #if UNITY_STANDALONE_WIN
@@ -990,9 +1053,6 @@ public class AvatarWindowHandler : MonoBehaviour
     [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
     delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-    public struct RECT { public int Left, Top, Right, Bottom; }
-    public struct POINT { public int X, Y; }
-    struct WindowEntry { public IntPtr hwnd; public RECT rect; public bool isTaskbar; }
     static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
     static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
     const uint GA_ROOT = 2;

@@ -26,8 +26,13 @@ public class AvatarGravityController : MonoBehaviour
 
     void Start()
     {
+#if UNITY_STANDALONE_WIN
         previousWindowPos = GetWindowPosition();
         unityHWND = Process.GetCurrentProcess().MainWindowHandle;
+#else
+        previousWindowPos = Vector2Int.zero;
+        unityHWND = IntPtr.Zero;
+#endif
 
         // VRM0 spring bones
         springBones.AddRange(GetComponentsInChildren<VRMSpringBone>(true));
@@ -41,7 +46,11 @@ public class AvatarGravityController : MonoBehaviour
 
     void Update()
     {
+#if UNITY_STANDALONE_WIN
         Vector2Int currentWindowPos = GetWindowPosition();
+#else
+        Vector2Int currentWindowPos = Vector2Int.zero;
+#endif
         Vector2Int delta = currentWindowPos - previousWindowPos;
 
         if (delta != Vector2Int.zero)
@@ -89,6 +98,7 @@ public class AvatarGravityController : MonoBehaviour
 
     #region Windows API
 
+#if UNITY_STANDALONE_WIN
     private Vector2Int GetWindowPosition()
     {
         GetWindowRect(unityHWND, out RECT rect);
@@ -103,6 +113,12 @@ public class AvatarGravityController : MonoBehaviour
     {
         public int left, top, right, bottom;
     }
+#else
+    private Vector2Int GetWindowPosition()
+    {
+        return Vector2Int.zero;
+    }
+#endif
 
     #endregion
 }

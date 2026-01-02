@@ -4,6 +4,7 @@ using UnityEngine;
 
 public static class MonitorHelper
 {
+#if UNITY_STANDALONE_WIN
     // -- Monitor lookup ----------------------------------------------------
     public const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
 
@@ -27,12 +28,14 @@ public static class MonitorHelper
     {
         public int Left, Top, Right, Bottom;
     }
+#endif
 
     /// <summary>
     /// Returns the taskbar Rect on whichever monitor contains the given window handle.
     /// </summary>
     public static Rect GetTaskbarRectForWindow(IntPtr windowHandle)
     {
+#if UNITY_STANDALONE_WIN
         var hMon = MonitorFromWindow(windowHandle, MONITOR_DEFAULTTONEAREST);
         var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         if (!GetMonitorInfo(hMon, ref mi))
@@ -58,9 +61,14 @@ public static class MonitorHelper
             return new Rect(mon.xMin, work.yMax, mon.width, mon.yMax - work.yMax);
 
         return new Rect(0, 0, 0, 0);
+#else
+        // No taskbar on macOS Dock is not the same
+        return new Rect(0, 0, 0, 0);
+#endif
     }
 
     // -- DPI / scaling lookup ----------------------------------------------
+#if UNITY_STANDALONE_WIN
     enum MONITOR_DPI_TYPE
     {
         MDT_EFFECTIVE_DPI = 0,
@@ -75,16 +83,22 @@ public static class MonitorHelper
         out uint dpiX,
         out uint dpiY
     );
+#endif
 
     /// <summary>
     /// Returns the scale factor (e.g. 1.5 for 150% DPI) for the monitor containing the given window.
     /// </summary>
     public static float GetScaleForWindow(IntPtr windowHandle)
     {
+#if UNITY_STANDALONE_WIN
         var hMon = MonitorFromWindow(windowHandle, MONITOR_DEFAULTTONEAREST);
         if (GetDpiForMonitor(hMon, MONITOR_DPI_TYPE.MDT_EFFECTIVE_DPI, out var dpiX, out var dpiY) == 0)
-            return dpiX / 96f;  // Windows uses 96 DPI as “100%”
+            return dpiX / 96f;  // Windows uses 96 DPI as "100%"
 
         return 1f;  // fallback on failure
+#else
+        // On macOS, return 1.0 or could implement NSScreen.backingScaleFactor if needed
+        return 1f;
+#endif
     }
 }

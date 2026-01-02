@@ -128,7 +128,7 @@ namespace MateEngine.Platform
 
     internal class UnsupportedWindowService : IWindowService
     {
-        public IntPtr GetMainWindowHandle() => System.IntPtr.Zero;
+        public System.IntPtr GetMainWindowHandle() => System.IntPtr.Zero;
         public void SetWindowPosition(int x, int y, int width, int height) { }
         public void SetAlwaysOnTop(bool enabled) { }
         public void SetWindowLevel(WindowLevel level) { }
