@@ -2,8 +2,8 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-using Utils;
 using System.Reflection;
+using MateEngine.Platform;
 
 public class SystemTray : MonoBehaviour
 {
@@ -23,10 +23,22 @@ public class SystemTray : MonoBehaviour
     [SerializeField] private string iconName;
     [SerializeField] public List<TrayAction> actions = new();
 
+    private ISystemTrayService trayService;
+
     void Awake()
     {
-        TrayIcon.OnBuildMenu = BuildMenu;
-        TrayIcon.Init("App", iconName, icon, BuildMenu());
+        // Get platform system tray service
+        trayService = PlatformServiceLocator.SystemTrayService;
+
+        if (trayService != null && trayService.IsSupported)
+        {
+            // Initialize system tray with menu builder callback
+            trayService.Initialize("MateEngine", iconName, icon, BuildMenu);
+        }
+        else
+        {
+            Debug.LogWarning("System Tray is not supported on this platform");
+        }
     }
 
     private List<(string, Action)> BuildMenu()
