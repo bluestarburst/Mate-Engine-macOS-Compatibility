@@ -169,5 +169,43 @@ namespace MateEngine.Platform.Windows
             
             return false;
         }
+
+        public bool GetLayeredWindowAttributes(IntPtr hWnd, out uint colorKey, out byte alpha, out uint flags)
+        {
+            return NativeGetLayeredWindowAttributes(hWnd, out colorKey, out alpha, out flags);
+        }
+
+        public bool GetWindowCloakingState(IntPtr hWnd, out bool isCloaked)
+        {
+            isCloaked = false;
+            int cloaked = 0;
+            int result = NativeDwmGetWindowAttribute(hWnd, DWMWA_CLOAKED, out cloaked, sizeof(int));
+            if (result == 0) // S_OK
+            {
+                isCloaked = (cloaked != 0);
+                return true;
+            }
+            return false;
+        }
+
+        public uint GetCurrentProcessId()
+        {
+            return NativeGetCurrentProcessId();
+        }
+
+        #region P/Invoke Declarations
+
+        private const int DWMWA_CLOAKED = 14;
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool NativeGetLayeredWindowAttributes(IntPtr hwnd, out uint pcrKey, out byte pbAlpha, out uint pdwFlags);
+        
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll", PreserveSig = true)]
+        private static extern int NativeDwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+        
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern uint NativeGetCurrentProcessId();
+
+        #endregion
     }
 }

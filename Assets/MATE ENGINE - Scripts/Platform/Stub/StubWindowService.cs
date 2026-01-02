@@ -39,5 +39,18 @@ namespace MateEngine.Platform.Stub
         public IntPtr GetAncestor(IntPtr hWnd, GetAncestorFlags flags) => IntPtr.Zero;
         public IntPtr GetWindow(IntPtr hWnd, GetWindowCommand cmd) => IntPtr.Zero;
         public bool IsAboveInZOrder(IntPtr hWnd1, IntPtr hWnd2) => false;
+        public bool GetLayeredWindowAttributes(IntPtr hWnd, out uint colorKey, out byte alpha, out uint flags)
+        {
+            colorKey = 0;
+            alpha = 255;
+            flags = 0;
+            return false;
+        }
+        public bool GetWindowCloakingState(IntPtr hWnd, out bool isCloaked)
+        {
+            isCloaked = false;
+            return false;
+        }
+        public uint GetCurrentProcessId() => 0;
     }
 }

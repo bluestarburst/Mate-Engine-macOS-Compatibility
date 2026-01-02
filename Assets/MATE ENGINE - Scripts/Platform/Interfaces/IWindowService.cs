@@ -46,6 +46,15 @@ namespace MateEngine.Platform
         
         // Z-Order
         bool IsAboveInZOrder(IntPtr hWnd1, IntPtr hWnd2);
+        
+        // Window Layering & Transparency
+        bool GetLayeredWindowAttributes(IntPtr hWnd, out uint colorKey, out byte alpha, out uint flags);
+        
+        // DWM Attributes (Windows 7+)
+        bool GetWindowCloakingState(IntPtr hWnd, out bool isCloaked);
+        
+        // Process Information
+        uint GetCurrentProcessId();
     }
 
     // Supporting types
