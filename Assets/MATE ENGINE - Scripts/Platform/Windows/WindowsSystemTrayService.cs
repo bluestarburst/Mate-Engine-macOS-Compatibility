@@ -119,7 +119,8 @@ namespace MateEngine.Platform.Windows
             {
                 try
                 {
-                    Utils.TrayIcon.Dispose();
+                    // The TrayIcon class automatically cleans up on Application.quitting
+                    // We just need to mark ourselves as no longer initialized
                     _initialized = false;
                     Debug.Log("[WindowsSystemTrayService] Disposed successfully");
                 }
