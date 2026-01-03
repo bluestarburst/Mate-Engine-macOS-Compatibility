@@ -107,12 +107,25 @@ public class VRMLoader : MonoBehaviour
 
         isLoading = true;
         
+        // Temporarily disable topmost so file browser appears on top
+        var windowController = Kirurobo.UniWindowController.current;
+        bool wasTopmost = false;
+        if (windowController != null)
+        {
+            wasTopmost = windowController.isTopmost;
+            if (wasTopmost) windowController.isTopmost = false;
+        }
+        
         #if UNITY_STANDALONE_OSX && !UNITY_EDITOR
         // Use native macOS file browser for ARM64 compatibility
         string[] paths = NativeFileBrowserMacOS.OpenFilePanel("Select Model File", "", "vrm", false);
         if (paths.Length > 0 && !string.IsNullOrEmpty(paths[0]))
             LoadVRM(paths[0]);
         isLoading = false;
+        
+        // Restore topmost state
+        if (windowController != null && wasTopmost)
+            windowController.isTopmost = true;
         #else
         // Use async file dialog to prevent UI freeze
         var extensions = new[] { new ExtensionFilter("Model Files", "vrm", "me", "prefab") };
@@ -121,6 +134,10 @@ public class VRMLoader : MonoBehaviour
                 LoadVRM(paths[0]);
             
             isLoading = false;
+            
+            // Restore topmost state after file selection
+            if (windowController != null && wasTopmost)
+                windowController.isTopmost = true;
         });
         #endif
     }
