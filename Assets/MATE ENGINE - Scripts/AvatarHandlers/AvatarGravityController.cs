@@ -27,7 +27,9 @@ public class AvatarGravityController : MonoBehaviour
     void Start()
     {
         previousWindowPos = GetWindowPosition();
+#if UNITY_STANDALONE_WIN
         unityHWND = Process.GetCurrentProcess().MainWindowHandle;
+#endif
 
         // VRM0 spring bones
         springBones.AddRange(GetComponentsInChildren<VRMSpringBone>(true));
@@ -91,10 +93,15 @@ public class AvatarGravityController : MonoBehaviour
 
     private Vector2Int GetWindowPosition()
     {
+#if UNITY_STANDALONE_WIN
         GetWindowRect(unityHWND, out RECT rect);
         return new Vector2Int(rect.left, rect.top);
+#else
+        return Vector2Int.zero; // macOS: no window position tracking
+#endif
     }
 
+#if UNITY_STANDALONE_WIN
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
@@ -103,6 +110,7 @@ public class AvatarGravityController : MonoBehaviour
     {
         public int left, top, right, bottom;
     }
+#endif
 
     #endregion
 }

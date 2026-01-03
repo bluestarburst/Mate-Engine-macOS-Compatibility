@@ -3,6 +3,15 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+
+// Platform-independent struct definitions (needed for method signatures)
+public struct RECT { public int Left, Top, Right, Bottom; }
+public struct POINT { public int X, Y; }
+struct WindowEntry { public IntPtr hwnd; public RECT rect; public bool isTaskbar; }
+
+[StructLayout(LayoutKind.Sequential)]
+public struct WINDOWPLACEMENT { public int length; public int flags; public int showCmd; public POINT ptMinPosition; public POINT ptMaxPosition; public RECT rcNormalPosition; }
+
 public class AvatarWindowHandler : MonoBehaviour
 {
     [Header("Snap Safety")]
@@ -948,8 +957,6 @@ public class AvatarWindowHandler : MonoBehaviour
 #if UNITY_STANDALONE_WIN
     [DllImport("kernel32.dll")] static extern uint GetCurrentProcessId();
     [DllImport("user32.dll")] static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
-    [StructLayout(LayoutKind.Sequential)]
-    public struct WINDOWPLACEMENT { public int length; public int flags; public int showCmd; public POINT ptMinPosition; public POINT ptMaxPosition; public RECT rcNormalPosition; }
     const int SW_MAXIMIZE = 3;
     [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hWnd);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
@@ -982,9 +989,44 @@ public class AvatarWindowHandler : MonoBehaviour
     [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
     delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-    public struct RECT { public int Left, Top, Right, Bottom; }
-    public struct POINT { public int X, Y; }
-    struct WindowEntry { public IntPtr hwnd; public RECT rect; public bool isTaskbar; }
+    static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+    const uint GA_ROOT = 2;
+    const uint SWP_NOMOVE = 0x0002;
+    const uint SWP_NOSIZE = 0x0001;
+    const uint SWP_NOACTIVATE = 0x0010;
+#else
+    // macOS/Linux stub implementations to prevent compilation errors
+    static uint GetCurrentProcessId() => 0;
+    static bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl) => false;
+    const int SW_MAXIMIZE = 3;
+    static bool IsIconic(IntPtr hWnd) => false;
+    static IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex) => IntPtr.Zero;
+    static bool GetLayeredWindowAttributes(IntPtr hwnd, out uint pcrKey, out byte pbAlpha, out uint pdwFlags) { pcrKey = 0; pbAlpha = 0; pdwFlags = 0; return false; }
+    static IntPtr GetWindow(IntPtr hWnd, uint uCmd) => IntPtr.Zero;
+    const uint GW_HWNDPREV = 3;
+    const int GWL_STYLE = -16;
+    const int GWL_EXSTYLE = -20;
+    const int WS_CAPTION = 0x00C00000;
+    const int WS_EX_LAYERED = 0x00080000;
+    const int WS_EX_TRANSPARENT = 0x00000020;
+    const int WS_EX_TOOLWINDOW = 0x00000080;
+    const int WS_EX_NOACTIVATE = 0x08000000;
+    const uint LWA_COLORKEY = 0x00000001;
+    const uint LWA_ALPHA = 0x00000002;
+    static int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount) => 0;
+    static IntPtr GetAncestor(IntPtr hwnd, uint gaFlags) => IntPtr.Zero;
+    static bool GetWindowRect(IntPtr hWnd, out RECT lpRect) { lpRect = new RECT(); return false; }
+    static bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint) => false;
+    static bool IsWindowVisible(IntPtr hWnd) => false;
+    static uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId) { lpdwProcessId = 0; return 0; }
+    delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    static bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam) => false;
+    static bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags) => false;
+    static IntPtr GetParent(IntPtr hWnd) => IntPtr.Zero;
+    static int GetWindowTextLength(IntPtr hWnd) => 0;
+    static bool GetClientRect(IntPtr hWnd, out RECT lpRect) { lpRect = new RECT(); return false; }
+    static bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint) => false;
     static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
     static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
     const uint GA_ROOT = 2;

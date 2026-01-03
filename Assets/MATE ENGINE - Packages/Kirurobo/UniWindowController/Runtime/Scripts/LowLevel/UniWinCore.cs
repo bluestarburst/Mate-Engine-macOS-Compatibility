@@ -219,24 +219,36 @@ namespace Kirurobo
             [UnmanagedFunctionPointer((CallingConvention.Winapi))]
             public delegate void IntCallback([MarshalAs(UnmanagedType.I4)] int value);
 
-            // All methods return safe defaults for non-Windows platforms
-            public static bool IsActive() => false;
+            // macOS: Call LibUniWinC.bundle for transparency and other window operations
+            // The native Swift bundle handles window transparency at the OS level
+            [DllImport("LibUniWinC")]
+            public static extern void SetTransparent([MarshalAs(UnmanagedType.U1)] bool bEnabled);
+
+            [DllImport("LibUniWinC")]
+            public static extern void SetBorderless([MarshalAs(UnmanagedType.U1)] bool bEnabled);
+
+            [DllImport("LibUniWinC")]
+            public static extern void SetAlphaValue(float alpha);
+
+            [DllImport("LibUniWinC")]
+            public static extern void SetTopmost([MarshalAs(UnmanagedType.U1)] bool bEnabled);
+
+            [DllImport("LibUniWinC")]
+            public static extern void SetBottommost([MarshalAs(UnmanagedType.U1)] bool bEnabled);
+
+            // Stub implementations for non-Windows platforms
+            public static bool IsActive() => true;
             public static bool IsTransparent() => false;
             public static bool IsBorderless() => false;
             public static bool IsTopmost() => false;
             public static bool IsBottommost() => false;
             public static bool IsMaximized() => false;
-            public static bool AttachMyWindow() => false;
-            public static bool AttachMyOwnerWindow() => false;
-            public static bool AttachMyActiveWindow() => false;
-            public static bool DetachWindow() => false;
+            public static bool AttachMyWindow() => true;
+            public static bool AttachMyOwnerWindow() => true;
+            public static bool AttachMyActiveWindow() => true;
+            public static bool DetachWindow() => true;
             public static void Update() { }
-            public static void SetTransparent(bool bEnabled) { }
-            public static void SetBorderless(bool bEnabled) { }
-            public static void SetAlphaValue(float alpha) { }
             public static void SetClickThrough(bool bEnabled) { }
-            public static void SetTopmost(bool bEnabled) { }
-            public static void SetBottommost(bool bEnabled) { }
             public static void SetMaximized(bool bZoomed) { }
             public static void SetPosition(float x, float y) { }
             public static bool GetPosition(out float x, out float y) { x = 0; y = 0; return false; }
@@ -923,3 +935,4 @@ namespace Kirurobo
 
     }
 }
+#endregion

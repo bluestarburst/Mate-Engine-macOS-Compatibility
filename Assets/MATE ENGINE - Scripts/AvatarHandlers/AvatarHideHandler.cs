@@ -54,6 +54,15 @@ public class AvatarHideHandler : MonoBehaviour
         snappedSide = Side.None;
     }
 
+    void SetHide(bool left, bool right)
+    {
+        if (animator != null)
+        {
+            animator.SetBool("HideLeft", left);
+            animator.SetBool("HideRight", right);
+        }
+    }
+
     void Update()
     {
 #if !UNITY_STANDALONE_WIN
@@ -194,12 +203,6 @@ public class AvatarHideHandler : MonoBehaviour
         smoothingActive = false;
         velX = velY = 0f;
         SetTopMost(false);
-    }
-
-    void SetHide(bool left, bool right)
-    {
-        animator.SetBool("HideLeft", left);
-        animator.SetBool("HideRight", right);
     }
 
     void MoveSmooth(int curX, int curY, int targetX, int targetY, int w, int h)
