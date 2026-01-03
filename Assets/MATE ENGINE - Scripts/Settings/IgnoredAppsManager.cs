@@ -4,7 +4,9 @@ using TMPro;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+#if UNITY_STANDALONE_WIN
 using NAudio.CoreAudioApi;
+#endif
 
 public class AllowedAppsManager : MonoBehaviour
 {
@@ -13,16 +15,22 @@ public class AllowedAppsManager : MonoBehaviour
     public Transform allowedAppsListContent;
     public GameObject allowedAppItemPrefab;
 
+    #if UNITY_STANDALONE_WIN
     private MMDeviceEnumerator enumerator;
     private MMDevice defaultDevice;
+    #endif
 
     private List<string> currentRunningAppNames = new List<string>();
     private List<string> allowedApps => SaveLoadHandler.Instance.data.allowedApps;
 
     private void Start()
     {
+        #if UNITY_STANDALONE_WIN
         enumerator = new MMDeviceEnumerator();
         UpdateDefaultDevice();
+        #else
+        UnityEngine.Debug.LogWarning("NAudio is not supported on macOS. Audio app detection disabled.");
+        #endif
 
         addToAllowedListButton.onClick.AddListener(() =>
         {
@@ -45,14 +53,17 @@ public class AllowedAppsManager : MonoBehaviour
         SaveLoadHandler.SyncAllowedAppsToAllAvatars(); // Initial sync on load
     }
 
+    #if UNITY_STANDALONE_WIN
     private void UpdateDefaultDevice()
     {
         defaultDevice?.Dispose();
         defaultDevice = enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
     }
+    #endif
 
     private void RefreshRunningAppsDropdown()
     {
+        #if UNITY_STANDALONE_WIN
         UpdateDefaultDevice(); // Ensure defaultDevice is fresh
 
         currentRunningAppNames = GetRunningAudioAppNames();
@@ -70,6 +81,10 @@ public class AllowedAppsManager : MonoBehaviour
         // Reset dropdown index if empty
         if (filteredAppNames.Count == 0)
             runningAppsDropdown.value = 0;
+        #else
+        // macOS: NAudio not available, clear dropdown
+        runningAppsDropdown.ClearOptions();
+        #endif
     }
 
     public void OnDropdownOpened()
@@ -104,6 +119,7 @@ public class AllowedAppsManager : MonoBehaviour
         }
     }
 
+    #if UNITY_STANDALONE_WIN
     private List<string> GetRunningAudioAppNames()
     {
         var appNames = new HashSet<string>();
@@ -129,11 +145,14 @@ public class AllowedAppsManager : MonoBehaviour
 
         return appNames.OrderBy(n => n).ToList();
     }
+    #endif
 
     private void OnDestroy()
     {
+        #if UNITY_STANDALONE_WIN
         enumerator?.Dispose();
         defaultDevice?.Dispose();
+        #endif
     }
 
     public void RefreshAppListOnMenuOpen()

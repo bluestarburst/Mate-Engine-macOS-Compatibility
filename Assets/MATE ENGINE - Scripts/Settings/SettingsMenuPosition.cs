@@ -29,6 +29,7 @@ public class SettingsMenuPosition : MonoBehaviour
 
     private IntPtr unityHWND;
 
+    #if UNITY_STANDALONE_WIN
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int left, top, right, bottom; }
 
@@ -39,9 +40,12 @@ public class SettingsMenuPosition : MonoBehaviour
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    #endif
 
+    #if UNITY_STANDALONE_WIN
     private readonly List<RECT> monitorRects = new List<RECT>();
     private MonitorEnumProc enumProc;
+    #endif
     private float checkTimer;
     private float monitorTimer;
     private bool lastAtRightEdge;
@@ -49,9 +53,11 @@ public class SettingsMenuPosition : MonoBehaviour
 
     void Start()
     {
+        #if UNITY_STANDALONE_WIN
         unityHWND = Process.GetCurrentProcess().MainWindowHandle;
         enumProc = EnumProc;
         RefreshMonitors();
+        #endif
         foreach (var menu in menus)
         {
             if (!menu.settingsMenu) continue;
@@ -63,6 +69,9 @@ public class SettingsMenuPosition : MonoBehaviour
 
     void Update()
     {
+        #if !UNITY_STANDALONE_WIN
+        return;
+        #else
         if (unityHWND == IntPtr.Zero) return;
 
         monitorTimer += Time.unscaledDeltaTime;
@@ -100,8 +109,10 @@ public class SettingsMenuPosition : MonoBehaviour
                 }
             }
         }
+        #endif
     }
 
+    #if UNITY_STANDALONE_WIN
     bool EnumProc(IntPtr hMonitor, IntPtr hdc, ref RECT lprc, IntPtr data)
     {
         monitorRects.Add(lprc);
@@ -110,8 +121,10 @@ public class SettingsMenuPosition : MonoBehaviour
 
     void RefreshMonitors()
     {
+        #if UNITY_STANDALONE_WIN
         monitorRects.Clear();
         EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, enumProc, IntPtr.Zero);
+        #endif
     }
 
     RECT GetBestMonitor(RECT win)
@@ -135,4 +148,5 @@ public class SettingsMenuPosition : MonoBehaviour
         int h = y2 - y1;
         return (w > 0 && h > 0) ? w * h : 0;
     }
+    #endif
 }
