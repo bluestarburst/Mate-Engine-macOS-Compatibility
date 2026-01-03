@@ -261,12 +261,5 @@ namespace Utils
             Debug.Log("Cleaned up resources for System Tray Icon");
 #endif
         }
-
-        /// <summary>Dispose of the System Tray Icon and cleanup resources</summary>
-        public static void Dispose()
-        {
-            CleanupResources();
-            _init = false;
-        }
     }
 }

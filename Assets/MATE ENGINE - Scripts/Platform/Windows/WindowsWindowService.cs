@@ -44,7 +44,7 @@ namespace MateEngine.Platform.Windows
             IntPtr hwnd = GetMainWindowHandle();
             if (hwnd != IntPtr.Zero)
             {
-                MoveWindowNative(hwnd, x, y, width, height, true);
+                MoveWindow(hwnd, x, y, width, height, true);
             }
 #endif
         }
@@ -169,14 +169,14 @@ namespace MateEngine.Platform.Windows
         public void MoveWindow(IntPtr hWnd, int x, int y, int width, int height, bool repaint)
         {
 #if UNITY_STANDALONE_WIN
-            MoveWindowNative(hWnd, x, y, width, height, repaint);
+            MoveWindow(hWnd, x, y, width, height, repaint);
 #endif
         }
 
         public bool IsWindowVisible(IntPtr hWnd)
         {
 #if UNITY_STANDALONE_WIN
-            return IsWindowVisibleNative(hWnd);
+            return IsWindowVisible(hWnd);
 #else
             return false;
 #endif
@@ -185,7 +185,7 @@ namespace MateEngine.Platform.Windows
         public void ShowWindow(IntPtr hWnd, int cmdShow)
         {
 #if UNITY_STANDALONE_WIN
-            ShowWindowNative(hWnd, cmdShow);
+            ShowWindow(hWnd, cmdShow);
 #endif
         }
 
@@ -234,8 +234,8 @@ namespace MateEngine.Platform.Windows
         [DllImport("user32.dll")]
         private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
 
-        [DllImport("user32.dll", EntryPoint = "MoveWindow")]
-        private static extern bool MoveWindowNative(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
+        [DllImport("user32.dll")]
+        private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
 
         [DllImport("user32.dll")]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
@@ -249,11 +249,11 @@ namespace MateEngine.Platform.Windows
         [DllImport("user32.dll")]
         private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
-        [DllImport("user32.dll", EntryPoint = "IsWindowVisible")]
-        private static extern bool IsWindowVisibleNative(IntPtr hWnd);
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
 
-        [DllImport("user32.dll", EntryPoint = "ShowWindow")]
-        private static extern bool ShowWindowNative(IntPtr hWnd, int nCmdShow);
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
         [DllImport("user32.dll")]
         private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);

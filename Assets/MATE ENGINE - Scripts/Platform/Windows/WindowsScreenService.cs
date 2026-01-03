@@ -176,7 +176,7 @@ namespace MateEngine.Platform.Windows
         public int GetSystemMetrics(int index)
         {
 #if UNITY_STANDALONE_WIN
-            return GetSystemMetricsNative(index);
+            return GetSystemMetrics(index);
 #else
             return 0;
 #endif
@@ -236,8 +236,8 @@ namespace MateEngine.Platform.Windows
         [DllImport("user32.dll")]
         private static extern IntPtr WindowFromPoint(POINT Point);
 
-        [DllImport("user32.dll", EntryPoint = "GetSystemMetrics")]
-        private static extern int GetSystemMetricsNative(int nIndex);
+        [DllImport("user32.dll")]
+        private static extern int GetSystemMetrics(int nIndex);
 #endif
     }
 }

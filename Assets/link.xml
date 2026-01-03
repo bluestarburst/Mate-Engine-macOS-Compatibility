@@ -1,7 +1,0 @@
-<linker>
-  <!-- System.Windows.Forms has platform-specific dependencies that cause IL2CPP linker issues.
-       To use System Tray functionality, disable Managed Stripping in Player Settings:
-       Edit > Project Settings > Player > Other Settings > Managed Stripping Level > Minimal (or Disabled)
-       
-       This link.xml file can remain for future preservation rules. -->
-</linker>
