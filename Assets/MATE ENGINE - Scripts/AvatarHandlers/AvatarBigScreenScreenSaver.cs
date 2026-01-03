@@ -33,6 +33,7 @@ public class AvatarBigScreenScreenSaver : MonoBehaviour
     private Vector2 lastMousePos;
     private float idleTimer = 0f;
 
+    #if UNITY_STANDALONE_WIN
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out POINT lpPoint);
 
@@ -45,6 +46,7 @@ public class AvatarBigScreenScreenSaver : MonoBehaviour
         public int X;
         public int Y;
     }
+    #endif
 
     void Start()
     {
@@ -185,19 +187,29 @@ public class AvatarBigScreenScreenSaver : MonoBehaviour
 
     Vector2 GetGlobalMousePosition()
     {
+        #if UNITY_STANDALONE_WIN
         POINT point;
         GetCursorPos(out point);
         return new Vector2(point.X, point.Y);
+        #else
+        // macOS fallback - use Unity's Input system
+        return Input.mousePosition;
+        #endif
     }
 
     bool IsAnyKeyPressed()
     {
+        #if UNITY_STANDALONE_WIN
         for (int key = 0x08; key <= 0xFE; key++)
         {
             if ((GetAsyncKeyState(key) & 0x8000) != 0)
                 return true;
         }
         return false;
+        #else
+        // macOS fallback - check common keys through Unity Input
+        return Input.anyKey;
+        #endif
     }
 
     bool IsInAllowedState()
