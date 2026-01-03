@@ -106,8 +106,16 @@ public class VRMLoader : MonoBehaviour
         if (isLoading) return;
 
         isLoading = true;
+        
+        #if UNITY_STANDALONE_OSX && !UNITY_EDITOR
+        // Use native macOS file browser for ARM64 compatibility
+        string[] paths = NativeFileBrowserMacOS.OpenFilePanel("Select Model File", "", "vrm", false);
+        #else
+        // Use StandaloneFileBrowser on other platforms
         var extensions = new[] { new ExtensionFilter("Model Files", "vrm", "me", "prefab") };
         string[] paths = StandaloneFileBrowser.OpenFilePanel("Select Model File", "", extensions, false);
+        #endif
+        
         if (paths.Length > 0 && !string.IsNullOrEmpty(paths[0]))
             LoadVRM(paths[0]);
 
