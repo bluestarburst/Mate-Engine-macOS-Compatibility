@@ -1,13 +1,30 @@
 <linker>
+    <!-- VRM 0.x libraries -->
     <assembly fullname="VRM" preserve="all">
         <type fullname="VRM.VRMImporterContext" preserve="all"/>
     </assembly>
 
-    <assembly fullname="VRMShaders">
+    <assembly fullname="VRMShaders" preserve="all">
         <type fullname="VRM.MToon.MToon" preserve="all"/>
     </assembly>
 
+    <!-- UniHumanoid - Required for VRM bone/humanoid handling -->
+    <assembly fullname="UniHumanoid" preserve="all"/>
+
+    <!-- Core VRM/glTF libraries -->
     <assembly fullname="UniGLTF" preserve="all"/>
     <assembly fullname="UniVRM" preserve="all"/>
+
+    <!-- VRM 1.0 libraries -->
+    <assembly fullname="UniVRM10" preserve="all"/>
+    <assembly fullname="VRM10" preserve="all"/>
+    <assembly fullname="VrmLib" preserve="all"/>
+
+    <!-- MToon shader -->
+    <assembly fullname="MToon" preserve="all"/>
+
+    <!-- Mesh utilities -->
+    <assembly fullname="MeshUtility" preserve="all"/>
+
     <assembly fullname="UnityEngine" preserve="all"/>
 </linker>

@@ -1,0 +1,28 @@
+<linker>
+    <!-- VRM/UniHumanoid libraries - PRESERVE ALL -->
+    <assembly fullname="UniHumanoid" preserve="all"/>
+    <assembly fullname="VRM" preserve="all"/>
+    <assembly fullname="VRMShaders" preserve="all"/>
+    <assembly fullname="UniGLTF" preserve="all"/>
+    <assembly fullname="UniGLTF.Utils" preserve="all"/>
+    <assembly fullname="VRM10" preserve="all"/>
+    <assembly fullname="VrmLib" preserve="all"/>
+    <assembly fullname="MToon" preserve="all"/>
+    <assembly fullname="MeshUtility" preserve="all"/>
+    <assembly fullname="Newtonsoft.Json" preserve="all"/>
+
+    <!-- NUCLEAR: Preserve ALL System assemblies to prevent static initializer failures -->
+    <assembly fullname="mscorlib" preserve="all"/>
+    <assembly fullname="System" preserve="all"/>
+    <assembly fullname="System.Core" preserve="all"/>
+    <assembly fullname="System.Runtime" preserve="all"/>
+    <assembly fullname="System.Reflection" preserve="all"/>
+    <assembly fullname="System.Collections" preserve="all"/>
+    <assembly fullname="System.Linq" preserve="all"/>
+    <assembly fullname="netstandard" preserve="all"/>
+
+    <!-- Unity core modules -->
+    <assembly fullname="UnityEngine" preserve="all"/>
+    <assembly fullname="UnityEngine.CoreModule" preserve="all"/>
+    <assembly fullname="UnityEngine.AnimationModule" preserve="all"/>
+</linker>

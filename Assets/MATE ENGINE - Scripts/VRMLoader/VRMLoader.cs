@@ -118,17 +118,26 @@ public class VRMLoader : MonoBehaviour
         
         #if UNITY_STANDALONE_OSX && !UNITY_EDITOR
         // Use native macOS file browser for ARM64 compatibility
-        string[] paths = NativeFileBrowserMacOS.OpenFilePanel("Select Model File", "", "vrm", false);
+        // Note: NativeFileBrowserMacOS doesn't support multiple extensions, so we pass empty string to allow all files
+        // The LoadVRM method will handle validation
+        string[] paths = NativeFileBrowserMacOS.OpenFilePanel("Select Model File", "", "", false);
         if (paths.Length > 0 && !string.IsNullOrEmpty(paths[0]))
+        {
+            Debug.Log($"[VRMLoader] File selected from macOS picker: {paths[0]}");
             LoadVRM(paths[0]);
+        }
+        else
+        {
+            Debug.Log("[VRMLoader] No file selected or empty path returned");
+        }
         isLoading = false;
-        
+
         // Restore topmost state
         if (windowController != null && wasTopmost)
             windowController.isTopmost = true;
         #else
         // Use async file dialog to prevent UI freeze
-        var extensions = new[] { new ExtensionFilter("Model Files", "vrm", "me", "prefab") };
+        var extensions = new[] { new ExtensionFilter("Model Files", "vrm", "glb", "me", "prefab") };
         StandaloneFileBrowser.OpenFilePanelAsync("Select Model File", "", extensions, false, (string[] paths) => {
             if (paths.Length > 0 && !string.IsNullOrEmpty(paths[0]))
                 LoadVRM(paths[0]);
@@ -175,17 +184,31 @@ public class VRMLoader : MonoBehaviour
             return;
         }
 
-        if (!File.Exists(path)) return;
+        if (!File.Exists(path))
+        {
+            Debug.LogError($"[VRMLoader] File does not exist: {path}");
+            return;
+        }
+
+        Debug.Log($"[VRMLoader] Loading VRM file: {path}");
 
         try
         {
             byte[] fileData = await Task.Run(() => File.ReadAllBytes(path));
-            if (fileData == null || fileData.Length == 0) return;
+            if (fileData == null || fileData.Length == 0)
+            {
+                Debug.LogError($"[VRMLoader] Failed to read file or file is empty: {path}");
+                return;
+            }
+
+            Debug.Log($"[VRMLoader] File read successfully, size: {fileData.Length} bytes");
 
             GameObject loadedModel = null;
 
+            // Try VRM 1.0 format first
             try
             {
+                Debug.Log("[VRMLoader] Attempting VRM 1.0 parsing...");
                 var glbData = new GlbFileParser(path).Parse();
                 var vrm10Data = Vrm10Data.Parse(glbData);
                 if (vrm10Data != null)
@@ -197,16 +220,21 @@ public class VRMLoader : MonoBehaviour
                         loadedModel = instance10.Root;
                         currentGltf = instance10;
                         loadedModel.AddComponent<GltfInstanceDisposer>().Bind(instance10);
+                        Debug.Log("[VRMLoader] VRM 1.0 model loaded successfully");
                     }
-
                 }
             }
-            catch { }
+            catch (Exception vrm10Ex)
+            {
+                Debug.Log($"[VRMLoader] VRM 1.0 parsing failed (trying VRM 0.x): {vrm10Ex.Message}");
+            }
 
+            // Fallback to VRM 0.x format
             if (loadedModel == null)
             {
                 try
                 {
+                    Debug.Log("[VRMLoader] Attempting VRM 0.x parsing...");
                     using var gltfData = new GlbBinaryParser(fileData, path).Parse();
                     VRMImporterContext importer = null;
                     try
@@ -218,18 +246,26 @@ public class VRMLoader : MonoBehaviour
                             loadedModel = instance.Root;
                             currentGltf = instance;
                             loadedModel.AddComponent<GltfInstanceDisposer>().Bind(instance);
+                            Debug.Log("[VRMLoader] VRM 0.x model loaded successfully");
                         }
-
                     }
                     finally
                     {
                         importer?.Dispose();
                     }
                 }
-                catch { return; }
+                catch (Exception vrm0Ex)
+                {
+                    Debug.LogError($"[VRMLoader] VRM 0.x parsing also failed: {vrm0Ex.Message}");
+                    return;
+                }
             }
 
-            if (loadedModel == null) return;
+            if (loadedModel == null)
+            {
+                Debug.LogError("[VRMLoader] Failed to load model - loadedModel is null");
+                return;
+            }
 
             FinalizeLoadedModel(loadedModel, path);
             if (SaveLoadHandler.Instance != null)
@@ -292,6 +328,7 @@ public class VRMLoader : MonoBehaviour
         string fileType = "Unknown";
         Texture2D thumbnail = null;
         bool isME = path.EndsWith(".me", StringComparison.OrdinalIgnoreCase);
+        bool isGLB = path.EndsWith(".glb", StringComparison.OrdinalIgnoreCase);
 
         var vrm10Instance = loadedModel.GetComponent<UniVRM10.Vrm10Instance>();
         if (vrm10Instance != null && vrm10Instance.Vrm != null && vrm10Instance.Vrm.Meta != null)
@@ -299,7 +336,7 @@ public class VRMLoader : MonoBehaviour
             displayName = vrm10Instance.Vrm.Meta.Name ?? displayName;
             author = (vrm10Instance.Vrm.Meta.Authors != null && vrm10Instance.Vrm.Meta.Authors.Count > 0) ? vrm10Instance.Vrm.Meta.Authors[0] : "Unknown";
             version = vrm10Instance.Vrm.Meta.Version ?? "Unknown";
-            fileType = isME ? ".ME (VRM1.X)" : "VRM1.X";
+            fileType = isME ? ".ME (VRM1.X)" : (isGLB ? "GLB (VRM1.X)" : "VRM1.X");
             thumbnail = vrm10Instance.Vrm.Meta.Thumbnail;
         }
         else
@@ -311,7 +348,7 @@ public class VRMLoader : MonoBehaviour
                 displayName = !string.IsNullOrEmpty(meta.Title) ? meta.Title : displayName;
                 author = !string.IsNullOrEmpty(meta.Author) ? meta.Author : "Unknown";
                 version = !string.IsNullOrEmpty(meta.Version) ? meta.Version : "Unknown";
-                fileType = isME ? ".ME (VRM0.X)" : "VRM0.X";
+                fileType = isME ? ".ME (VRM0.X)" : (isGLB ? "GLB (VRM0.X)" : "VRM0.X");
                 thumbnail = meta.Thumbnail;
             }
         }
@@ -540,7 +577,12 @@ public class VRMLoader : MonoBehaviour
         if (path.EndsWith(".prefab", StringComparison.OrdinalIgnoreCase))
             return true;
 #endif
-        if (!File.Exists(path) && !path.EndsWith(".vrm") && !path.EndsWith(".me"))
+        // Check if it's a DLC reference (not a file path)
+        // A path is a DLC reference if it doesn't exist AND doesn't look like a VRM/GLB/ME file
+        if (!File.Exists(path) &&
+            !path.EndsWith(".vrm", StringComparison.OrdinalIgnoreCase) &&
+            !path.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) &&
+            !path.EndsWith(".me", StringComparison.OrdinalIgnoreCase))
             return true;
         return false;
     }

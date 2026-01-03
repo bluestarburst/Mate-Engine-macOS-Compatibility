@@ -34,16 +34,38 @@ namespace UniHumanoid
         // * traitName.Replace
         // * Enum.Parse
         //
-        private static readonly Dictionary<HumanBodyBones, string> cachedHumanBodyBonesToBoneTraitNameMap =
-        HumanTrait.BoneName.ToDictionary(
-            traitName => (HumanBodyBones)Enum.Parse(typeof(HumanBodyBones), traitName.Replace(" ", "")),
-            traitName => traitName);
+        // THREAD-SAFETY FIX: Changed from static field initialization to lazy-loaded properties
+        // to prevent UnityException when accessed from background threads (Unity 6 + Apple Silicon)
+        private static Dictionary<HumanBodyBones, string> _cachedHumanBodyBonesToBoneTraitNameMap;
+        private static Dictionary<HumanBodyBones, string> cachedHumanBodyBonesToBoneTraitNameMap
+        {
+            get
+            {
+                if (_cachedHumanBodyBonesToBoneTraitNameMap == null)
+                {
+                    _cachedHumanBodyBonesToBoneTraitNameMap = HumanTrait.BoneName.ToDictionary(
+                        traitName => (HumanBodyBones)Enum.Parse(typeof(HumanBodyBones), traitName.Replace(" ", "")),
+                        traitName => traitName);
+                }
+                return _cachedHumanBodyBonesToBoneTraitNameMap;
+            }
+        }
 
         // 逆引き
-        private static readonly Dictionary<string, HumanBodyBones> cachedBoneTraitNameToHumanBodyBonesMap =
-        HumanTrait.BoneName.ToDictionary(
-            traitName => traitName,
-            traitName => (HumanBodyBones)Enum.Parse(typeof(HumanBodyBones), traitName.Replace(" ", "")));
+        private static Dictionary<string, HumanBodyBones> _cachedBoneTraitNameToHumanBodyBonesMap;
+        private static Dictionary<string, HumanBodyBones> cachedBoneTraitNameToHumanBodyBonesMap
+        {
+            get
+            {
+                if (_cachedBoneTraitNameToHumanBodyBonesMap == null)
+                {
+                    _cachedBoneTraitNameToHumanBodyBonesMap = HumanTrait.BoneName.ToDictionary(
+                        traitName => traitName,
+                        traitName => (HumanBodyBones)Enum.Parse(typeof(HumanBodyBones), traitName.Replace(" ", "")));
+                }
+                return _cachedBoneTraitNameToHumanBodyBonesMap;
+            }
+        }
 
         public static BoneLimit From(HumanBone bone)
         {
