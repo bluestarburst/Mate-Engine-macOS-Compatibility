@@ -164,7 +164,9 @@ public class AllowedAppsManager : MonoBehaviour
 
     public void RefreshUI()
     {
+        #if UNITY_STANDALONE_WIN
         UpdateDefaultDevice();
+        #endif
         RefreshRunningAppsDropdown();
         UpdateAllowedListUI();
         SaveLoadHandler.SyncAllowedAppsToAllAvatars();
