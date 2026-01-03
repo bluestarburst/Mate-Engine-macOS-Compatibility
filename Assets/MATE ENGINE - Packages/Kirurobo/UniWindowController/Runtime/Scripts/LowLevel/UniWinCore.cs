@@ -52,7 +52,6 @@ namespace Kirurobo
         };
 
         #region Native functions
-#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
         protected class LibUniWinC
         {
             [UnmanagedFunctionPointer(CallingConvention.Winapi)]
@@ -209,72 +208,6 @@ namespace Kirurobo
             public static extern bool AttachWindowHandle(IntPtr hWnd);
             #endregion
         }
-#else
-        // macOS / Linux stub implementations
-        protected class LibUniWinC
-        {
-            [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-            public delegate void StringCallback([MarshalAs(UnmanagedType.LPWStr)] string returnString);
-
-            [UnmanagedFunctionPointer((CallingConvention.Winapi))]
-            public delegate void IntCallback([MarshalAs(UnmanagedType.I4)] int value);
-
-            // macOS: Call LibUniWinC.bundle for transparency and other window operations
-            // The native Swift bundle handles window transparency at the OS level
-            [DllImport("LibUniWinC")]
-            public static extern void SetTransparent([MarshalAs(UnmanagedType.U1)] bool bEnabled);
-
-            [DllImport("LibUniWinC")]
-            public static extern void SetBorderless([MarshalAs(UnmanagedType.U1)] bool bEnabled);
-
-            [DllImport("LibUniWinC")]
-            public static extern void SetAlphaValue(float alpha);
-
-            [DllImport("LibUniWinC")]
-            public static extern void SetTopmost([MarshalAs(UnmanagedType.U1)] bool bEnabled);
-
-            [DllImport("LibUniWinC")]
-            public static extern void SetBottommost([MarshalAs(UnmanagedType.U1)] bool bEnabled);
-
-            // Stub implementations for non-Windows platforms
-            public static bool IsActive() => true;
-            public static bool IsTransparent() => false;
-            public static bool IsBorderless() => false;
-            public static bool IsTopmost() => false;
-            public static bool IsBottommost() => false;
-            public static bool IsMaximized() => false;
-            public static bool AttachMyWindow() => true;
-            public static bool AttachMyOwnerWindow() => true;
-            public static bool AttachMyActiveWindow() => true;
-            public static bool DetachWindow() => true;
-            public static void Update() { }
-            public static void SetClickThrough(bool bEnabled) { }
-            public static void SetMaximized(bool bZoomed) { }
-            public static void SetPosition(float x, float y) { }
-            public static bool GetPosition(out float x, out float y) { x = 0; y = 0; return false; }
-            public static void SetSize(float x, float y) { }
-            public static bool GetSize(out float x, out float y) { x = 0; y = 0; return false; }
-            public static bool GetClientSize(out float width, out float height) { width = 0; height = 0; return false; }
-            public static bool GetClientRectangle(out float x, out float y, out float width, out float height) { x = 0; y = 0; width = 0; height = 0; return false; }
-            public static bool RegisterDropFilesCallback(StringCallback callback) => false;
-            public static bool UnregisterDropFilesCallback() => false;
-            public static bool RegisterMonitorChangedCallback(IntCallback callback) => false;
-            public static bool UnregisterMonitorChangedCallback() => false;
-            public static bool RegisterWindowStyleChangedCallback(IntCallback callback) => false;
-            public static bool UnregisterWindowStyleChangedCallback() => false;
-            public static bool SetAllowDrop(bool enabled) => false;
-            public static int GetCurrentMonitor() => 0;
-            public static int GetMonitorCount() => 1;
-            public static bool GetMonitorRectangle(int index, out float x, out float y, out float width, out float height) { x = 0; y = 0; width = 1920; height = 1080; return index == 0; }
-            public static void SetCursorPosition(float x, float y) { }
-            public static bool GetCursorPosition(out float x, out float y) { x = 0; y = 0; return false; }
-            public static void SetTransparentType(int type) { }
-            public static void SetKeyColor(uint colorref) { }
-            public static int GetDebugInfo() => 0;
-            public static bool AttachWindowHandle(IntPtr hWnd) => false;
-        }
-#endif
-
 
         static string[] lastDroppedFiles;
         static bool wasDropped = false;
