@@ -102,16 +102,6 @@ public class AvatarAnimatorController : MonoBehaviour
         animator.SetBool(isDancingParam, true);
         animator.SetFloat(danceIndexParam, danceState);
     }
-    void SetDancing(bool value)
-    {
-        isDancing = value;
-        animator.SetBool(isDancingParam, value);
-        if (!value && danceTransitionCoroutine != null)
-        {
-            StopCoroutine(danceTransitionCoroutine);
-            danceTransitionCoroutine = null;
-        }
-    }
 
     bool IsValidAppPlaying()
     {
@@ -144,6 +134,17 @@ public class AvatarAnimatorController : MonoBehaviour
         return false;
     }
     #endif
+
+    void SetDancing(bool value)
+    {
+        isDancing = value;
+        animator.SetBool(isDancingParam, value);
+        if (!value && danceTransitionCoroutine != null)
+        {
+            StopCoroutine(danceTransitionCoroutine);
+            danceTransitionCoroutine = null;
+        }
+    }
 
     void Update()
     {

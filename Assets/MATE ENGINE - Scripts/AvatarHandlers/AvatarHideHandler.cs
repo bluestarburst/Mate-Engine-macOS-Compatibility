@@ -45,7 +45,7 @@ public class AvatarHideHandler : MonoBehaviour
             rightHand = animator.GetBoneTransform(HumanBodyBones.RightHand);
         }
         cam = Camera.main;
-        if (cam == null) cam = FindObjectOfType<Camera>();
+        if (cam == null) cam = FindFirstObjectByType<Camera>();
     }
 
     void OnDisable()

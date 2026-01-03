@@ -226,6 +226,7 @@ public class AvatarBigScreenScreenSaver : MonoBehaviour
     private bool lastGlobalMouseDown = false;
     private bool IsGlobalUserInput()
     {
+        #if UNITY_STANDALONE_WIN
         bool mouseDown = (GetAsyncKeyState(0x01) & 0x8000) != 0;
         bool mouseClick = mouseDown && !lastGlobalMouseDown;
         lastGlobalMouseDown = mouseDown;
@@ -240,6 +241,10 @@ public class AvatarBigScreenScreenSaver : MonoBehaviour
             }
         }
         return mouseClick || keyPressed;
+        #else
+        // macOS fallback - use Unity Input
+        return Input.GetMouseButtonDown(0) || Input.anyKeyDown;
+        #endif
     }
 
 }

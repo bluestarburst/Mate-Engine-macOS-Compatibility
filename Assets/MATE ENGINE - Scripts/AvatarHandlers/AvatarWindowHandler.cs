@@ -177,7 +177,7 @@ public class AvatarWindowHandler : MonoBehaviour
     {
 #if !UNITY_STANDALONE_WIN
         return;
-#endif
+#else
         if (snappedHWND != IntPtr.Zero)
         {
             if ((transform.lossyScale - _prevLossyScale).sqrMagnitude > 1e-8f) { _snapSmoothingActive = false; _snapVelX = _snapVelY = 0f; }
@@ -277,6 +277,7 @@ public class AvatarWindowHandler : MonoBehaviour
             }
         }
         wasDragging = controller.isDragging;
+#endif
     }
     void LateUpdate() { UpdateOccluderQuadsFrameSync(); }
     bool DraggedPastSnapThreshold()
