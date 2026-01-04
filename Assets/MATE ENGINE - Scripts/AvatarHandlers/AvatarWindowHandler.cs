@@ -892,7 +892,30 @@ public class AvatarWindowHandler : MonoBehaviour
         r.Left = p.X; r.Top = p.Y; r.Right = p.X + client.Right; r.Bottom = p.Y + client.Bottom;
         return true;
     }
-    void SetTopMost(bool en) => SetWindowPos(unityHWND, en ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    void SetTopMost(bool en)
+    {
+#if UNITY_STANDALONE_WIN
+        SetWindowPos(unityHWND, en ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+#elif UNITY_STANDALONE_OSX
+        // On macOS, use the special helper that can appear above fullscreen apps
+        // Credit: https://github.com/electron/electron/issues/10078
+        // Credit: https://github.com/hillelkingqt/GeminiDesk/pull/58
+        MacOSWindowHelper.EnableAlwaysOnTopOverFullscreen(en);
+        
+        if (en)
+        {
+            // Start monitoring space changes to keep window visible when switching spaces
+            MacOSWindowHelper.StartMonitoringSpaceChanges();
+            // Bring window to front to ensure it's visible
+            MacOSWindowHelper.BringToFront();
+        }
+        else
+        {
+            // Stop monitoring when disabling always-on-top
+            MacOSWindowHelper.StopMonitoringSpaceChanges();
+        }
+#endif
+    }
 
     bool IsWindowMaximized(IntPtr hwnd)
     {

@@ -268,7 +268,26 @@ public class AvatarHideHandler : MonoBehaviour
 
     void SetTopMost(bool on)
     {
+#if UNITY_STANDALONE_WIN
         SetWindowPos(unityHWND, on ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+#elif UNITY_STANDALONE_OSX
+        // On macOS, use the special helper that can appear above fullscreen apps
+        // Credit: https://github.com/electron/electron/issues/10078
+        MacOSWindowHelper.EnableAlwaysOnTopOverFullscreen(on);
+        
+        if (on)
+        {
+            // Start monitoring space changes to keep window visible when switching spaces
+            MacOSWindowHelper.StartMonitoringSpaceChanges();
+            // Bring window to front to ensure it's visible
+            MacOSWindowHelper.BringToFront();
+        }
+        else
+        {
+            // Stop monitoring when disabling always-on-top
+            MacOSWindowHelper.StopMonitoringSpaceChanges();
+        }
+#endif
     }
 
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }

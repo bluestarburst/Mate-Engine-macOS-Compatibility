@@ -1,0 +1,13 @@
+{
+    "name": "MateEngine.Editor",
+    "rootNamespace": "MateEngine.Editor",
+    "references": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [],
+    "defineConstraints": []
+}
