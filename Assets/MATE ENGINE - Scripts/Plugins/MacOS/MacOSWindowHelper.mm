@@ -10,8 +10,32 @@
 
 #import <Cocoa/Cocoa.h>
 #import <AppKit/AppKit.h>
+#import <CoreGraphics/CoreGraphics.h>
 
 extern "C" {
+
+// Define a struct to pass bounds data to C#
+typedef struct {
+    float x;
+    float y;
+    float width;
+    float height;
+    bool isValid;
+} BoundsResult;
+
+// Extended window info struct that includes window ID for tracking
+typedef struct {
+    int32_t windowNumber;   // CGWindowNumber - unique window identifier
+    int32_t ownerPID;       // Process ID of window owner
+    float x;
+    float y;
+    float width;
+    float height;
+    bool isValid;
+} WindowInfo;
+
+// Max windows to return in enumeration
+#define MAX_WINDOW_LIST 32
 
 // Get the main NSWindow for the Unity application
 NSWindow* GetUnityNSWindow() {
@@ -29,6 +53,118 @@ NSWindow* GetUnityNSWindow() {
         }
     }
     return window;
+}
+
+// Get the bounds of the Unity window in the same coordinate system as GetActiveWindowBounds
+// Returns bounds in CoreGraphics coordinates (origin at top-left of PRIMARY DISPLAY, y increases downward)
+// IMPORTANT: CGWindowListCopyWindowInfo returns coordinates in "points" (virtual pixels), NOT device pixels
+// and uses the PRIMARY display as the reference for Y=0, not the window's current screen
+BoundsResult MacOS_GetUnityWindowBounds() {
+    @autoreleasepool {
+        // Version marker to confirm plugin loaded (increment this when making changes)
+        static bool firstCall = true;
+        if (firstCall) {
+            NSLog(@"MacOSWindowHelper: Plugin version 2026-01-05-v9 (primary display Y-flip fix)");
+            firstCall = false;
+        }
+
+        BoundsResult result = {0, 0, 0, 0, false};
+
+        NSWindow* window = GetUnityNSWindow();
+        if (window == nil) {
+            NSLog(@"MacOSWindowHelper: Could not get Unity window for bounds query");
+            return result;
+        }
+
+        // Get the frame in Cocoa coordinates (points, bottom-left origin)
+        NSRect frame = [window frame];
+
+        // CRITICAL: CGWindowList uses a coordinate system where:
+        // - Y=0 is at the TOP of the PRIMARY display (not the window's current screen)
+        // - Y increases downward
+        // - Coordinates are in points
+        // Cocoa uses Y=0 at BOTTOM of PRIMARY display, Y increases upward
+        // So we must use the PRIMARY display height for the Y-flip, not the window's screen
+        NSScreen* primaryScreen = [NSScreen mainScreen];
+        if (primaryScreen == nil) {
+            NSLog(@"MacOSWindowHelper: Could not get primary screen for coordinate conversion");
+            return result;
+        }
+
+        // The primary screen's frame in Cocoa coordinates always has origin (0,0) at its bottom-left
+        // and the height gives us the reference for the CG coordinate flip
+        NSRect primaryFrame = [primaryScreen frame];
+        float primaryHeightPoints = primaryFrame.size.height;
+
+        // Cocoa: Y=0 at bottom of primary display, increases upward
+        // CoreGraphics/CGWindow: Y=0 at top of primary display, increases downward
+        // Convert: yFromTop = primaryHeight - yFromBottom - height (all in points)
+        // This works even if window is on a secondary display because Cocoa Y is still
+        // relative to the primary display bottom
+        float x = frame.origin.x;
+        float yFromBottom = frame.origin.y;
+        float w = frame.size.width;
+        float h = frame.size.height;
+        float yFromTop = primaryHeightPoints - yFromBottom - h;
+
+        NSLog(@"MacOSWindowHelper: Unity frame=(%.0f,%.0f %.0fx%.0f) primaryH=%.0f -> CG=(%.0f,%.0f)",
+              x, yFromBottom, w, h, primaryHeightPoints, x, yFromTop);
+
+        result.x = x;
+        result.y = yFromTop;
+        result.width = w;
+        result.height = h;
+        result.isValid = true;
+
+        return result;
+    }
+
+}
+
+// Get the Unity window backing scale factor (1.0 for non-Retina, 2.0 for Retina)
+float MacOS_GetUnityBackingScale() {
+    @autoreleasepool {
+        NSWindow* window = GetUnityNSWindow();
+        if (window == nil) return 1.0f;
+        if ([window respondsToSelector:@selector(backingScaleFactor)]) {
+            return (float)[window backingScaleFactor];
+        }
+        return 1.0f;
+    }
+}
+
+// Get the screen bounds in POINTS (same coordinate system as CGWindowList)
+// Returns bounds for the PRIMARY display (since CGWindowList uses primary display as origin)
+// NOTE: CGWindowList uses points, not device pixels, so we return points here too
+BoundsResult MacOS_GetScreenBounds() {
+    @autoreleasepool {
+        BoundsResult result = {0, 0, 0, 0, false};
+
+        // CRITICAL: Use primary screen for coordinate consistency with CGWindowList
+        // CGWindowList uses Y=0 at top of primary display, so we should return
+        // the primary display dimensions for proper clamping
+        NSScreen* screen = [NSScreen mainScreen];
+
+        if (screen == nil) {
+            NSLog(@"MacOSWindowHelper: Could not get primary screen for bounds query");
+            return result;
+        }
+
+        // Return primary screen frame in POINTS (same as CGWindowList coordinate system)
+        // Note: Primary screen frame origin in Cocoa is (0,0) at bottom-left
+        // For CGWindowList compatibility, origin should be (0,0) at top-left
+        NSRect screenFrame = [screen frame];
+        result.x = 0;  // Primary display X is always 0 in CG coordinates
+        result.y = 0;  // Primary display Y is always 0 in CG coordinates (top-left origin)
+        result.width = screenFrame.size.width;
+        result.height = screenFrame.size.height;
+        result.isValid = true;
+
+        NSLog(@"MacOSWindowHelper: Screen bounds (points, CG coords) = (%.0f,%.0f %.0fx%.0f)",
+              result.x, result.y, result.width, result.height);
+
+        return result;
+    }
 }
 
 // Enable always-on-top that works over fullscreen apps
@@ -267,6 +403,352 @@ void MacOS_StopMonitoringSpaceChanges() {
         // The notification center will handle cleanup when app terminates
         isMonitoringSpaces = false;
         NSLog(@"MacOSWindowHelper: Stopped monitoring space changes");
+    }
+}
+
+// Get the bounds of the macOS Dock
+// Requires Screen Recording permission (System Settings > Privacy & Security)
+BoundsResult MacOS_GetDockBounds() {
+    @autoreleasepool {
+        BoundsResult result = {0, 0, 0, 0, false};
+        
+        // Get list of all visible windows including system windows
+        CFArrayRef windowList = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly, 
+            kCGNullWindowID
+        );
+        
+        if (windowList == NULL) {
+            NSLog(@"MacOSWindowHelper: Could not get window list for Dock");
+            return result;
+        }
+        
+        for (NSDictionary *info in (__bridge NSArray *)windowList) {
+            NSString *ownerName = info[(id)kCGWindowOwnerName];
+            
+            if ([ownerName isEqualToString:@"Dock"]) {
+                CGRect bounds;
+                CGRectMakeWithDictionaryRepresentation(
+                    (CFDictionaryRef)info[(id)kCGWindowBounds], 
+                    &bounds
+                );
+                
+                result.x = bounds.origin.x;
+                result.y = bounds.origin.y;
+                result.width = bounds.size.width;
+                result.height = bounds.size.height;
+                result.isValid = true;
+                
+                break;
+            }
+        }
+        
+        CFRelease(windowList);
+        return result;
+    }
+}
+
+// Get the bounds of the top-most non-Unity window (ignores our own process)
+// Requires Screen Recording permission (System Settings > Privacy & Security)
+static BoundsResult gLastActiveWindow = {0, 0, 0, 0, false};
+
+BoundsResult MacOS_GetActiveWindowBounds() {
+    @autoreleasepool {
+        BoundsResult result = {0, 0, 0, 0, false};
+
+        int myPID = [[NSProcessInfo processInfo] processIdentifier];
+
+        CFArrayRef windowList = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID
+        );
+
+        if (windowList == NULL) {
+            NSLog(@"MacOSWindowHelper: Could not get window list for active window");
+            return result;
+        }
+
+        NSLog(@"MacOSWindowHelper: Looking for active window from PID %d", myPID);
+        
+        // Log top few windows for troubleshooting
+        int windowCount = (int)CFArrayGetCount(windowList);
+        NSLog(@"MacOSWindowHelper: Total windows in list: %d", windowCount);
+        
+        int logCount = 0;
+        for (NSDictionary *info in (__bridge NSArray *)windowList) {
+            if (logCount >= 5) break;
+            NSString *ownerName = info[(id)kCGWindowOwnerName];
+            NSNumber *ownerPID = info[(id)kCGWindowOwnerPID];
+            NSNumber *layer = info[(id)kCGWindowLayer];
+            CGRect bounds;
+            CGRectMakeWithDictionaryRepresentation((CFDictionaryRef)info[(id)kCGWindowBounds], &bounds);
+            NSLog(@"MacOSWindowHelper: Window #%d: '%@' PID=%@ layer=%@ bounds=(%.0f,%.0f %.0fx%.0f)", 
+                  logCount, ownerName, ownerPID, layer, 
+                  bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height);
+            logCount++;
+        }
+
+        bool foundPrimary = false;
+        CGRect fallbackBounds = CGRectZero;
+        bool hasFallback = false;
+        CGRect selfFallbackBounds = CGRectZero;
+        bool hasSelfFallback = false;
+
+        for (NSDictionary *info in (__bridge NSArray *)windowList) {
+            NSNumber *ownerPID = info[(id)kCGWindowOwnerPID];
+            bool isSelf = ([ownerPID intValue] == myPID);
+
+            NSNumber *layer = info[(id)kCGWindowLayer];
+            CGRect bounds;
+            if (!CGRectMakeWithDictionaryRepresentation((CFDictionaryRef)info[(id)kCGWindowBounds], &bounds)) {
+                continue;
+            }
+
+            // Skip obvious menu bar/status windows (very short heights)
+            if (bounds.size.height <= 40 && [layer intValue] <= 25) {
+                continue;
+            }
+
+            // Primary target: non-self, normal layer 0, reasonably sized
+            if (!isSelf && [layer intValue] == 0 && bounds.size.width > 50 && bounds.size.height > 80) {
+                result.x = bounds.origin.x;
+                result.y = bounds.origin.y;
+                result.width = bounds.size.width;
+                result.height = bounds.size.height;
+                result.isValid = true;
+                foundPrimary = true;
+                gLastActiveWindow = result;
+                break;
+            }
+
+            // Fallback non-self: first reasonable window of any layer
+            if (!isSelf && !hasFallback && bounds.size.width > 200 && bounds.size.height > 120) {
+                fallbackBounds = bounds;
+                hasFallback = true;
+            }
+
+            // Self fallback: remember our own window in case nothing else exists
+            if (isSelf && !hasSelfFallback && [layer intValue] == 0 && bounds.size.width > 200 && bounds.size.height > 120) {
+                selfFallbackBounds = bounds;
+                hasSelfFallback = true;
+            }
+        }
+
+        if (!foundPrimary && hasFallback) {
+            result.x = fallbackBounds.origin.x;
+            result.y = fallbackBounds.origin.y;
+            result.width = fallbackBounds.size.width;
+            result.height = fallbackBounds.size.height;
+            result.isValid = true;
+            gLastActiveWindow = result;
+            NSLog(@"MacOSWindowHelper: Using fallback non-self window (%.0f,%.0f %.0fx%.0f)", 
+                  result.x, result.y, result.width, result.height);
+        } else if (!foundPrimary && !hasFallback && hasSelfFallback) {
+            result.x = selfFallbackBounds.origin.x;
+            result.y = selfFallbackBounds.origin.y;
+            result.width = selfFallbackBounds.size.width;
+            result.height = selfFallbackBounds.size.height;
+            result.isValid = true;
+            gLastActiveWindow = result;
+            NSLog(@"MacOSWindowHelper: Using self window fallback (%.0f,%.0f %.0fx%.0f)", 
+                  result.x, result.y, result.width, result.height);
+        } else if (!foundPrimary && !hasFallback && !hasSelfFallback && gLastActiveWindow.isValid) {
+            // Sticky last known window to avoid disappearing when nothing else is found
+            result = gLastActiveWindow;
+            NSLog(@"MacOSWindowHelper: Using cached last window (%.0f,%.0f %.0fx%.0f)", 
+                  result.x, result.y, result.width, result.height);
+        } else if (foundPrimary) {
+            NSLog(@"MacOSWindowHelper: Found primary non-self window at layer 0 (%.0f,%.0f %.0fx%.0f)", 
+                  result.x, result.y, result.width, result.height);
+        } else {
+            NSLog(@"MacOSWindowHelper: No valid window found (foundPrimary=%d hasFallback=%d hasSelfFallback=%d lastValid=%d)", 
+                  foundPrimary, hasFallback, hasSelfFallback, gLastActiveWindow.isValid);
+        }
+
+        CFRelease(windowList);
+        return result;
+    }
+}
+
+// Request Screen Recording permission by triggering a window list query
+// This will cause macOS to show the permission prompt on first use
+void MacOS_RequestScreenRecordingPermission() {
+    @autoreleasepool {
+        // Simply calling CGWindowListCopyWindowInfo triggers the permission check
+        // If this is the first time, macOS will show a system prompt
+        CFArrayRef windowList = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionAll,
+            kCGNullWindowID
+        );
+        
+        if (windowList != NULL) {
+            NSLog(@"MacOSWindowHelper: Screen Recording permission check triggered");
+            CFRelease(windowList);
+        } else {
+            NSLog(@"MacOSWindowHelper: Screen Recording permission likely denied");
+        }
+    }
+}
+
+// Open System Settings to Screen Recording permission page
+void MacOS_OpenScreenRecordingSettings() {
+    @autoreleasepool {
+        // macOS 13+ uses new URL scheme
+        NSURL *url = [NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"];
+
+        // Try new API first (macOS 10.15+)
+        if (@available(macOS 10.15, *)) {
+            [[NSWorkspace sharedWorkspace] openURL:url];
+        } else {
+            // Fallback for older macOS
+            [[NSWorkspace sharedWorkspace] openURL:url];
+        }
+
+        NSLog(@"MacOSWindowHelper: Opened System Settings > Screen Recording");
+    }
+}
+
+// Get our own process ID (for filtering)
+int MacOS_GetCurrentPID() {
+    return [[NSProcessInfo processInfo] processIdentifier];
+}
+
+// Get the bounds of a specific window by its CGWindowNumber
+// Returns invalid result if window not found or has been closed
+WindowInfo MacOS_GetWindowByNumber(int32_t windowNumber) {
+    @autoreleasepool {
+        WindowInfo result = {0, 0, 0, 0, 0, 0, false};
+
+        if (windowNumber <= 0) {
+            return result;
+        }
+
+        CFArrayRef windowList = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID
+        );
+
+        if (windowList == NULL) {
+            return result;
+        }
+
+        for (NSDictionary *info in (__bridge NSArray *)windowList) {
+            NSNumber *winNum = info[(id)kCGWindowNumber];
+            if ([winNum intValue] != windowNumber) continue;
+
+            NSNumber *ownerPID = info[(id)kCGWindowOwnerPID];
+            CGRect bounds;
+            if (!CGRectMakeWithDictionaryRepresentation((CFDictionaryRef)info[(id)kCGWindowBounds], &bounds)) {
+                continue;
+            }
+
+            result.windowNumber = windowNumber;
+            result.ownerPID = [ownerPID intValue];
+            result.x = bounds.origin.x;
+            result.y = bounds.origin.y;
+            result.width = bounds.size.width;
+            result.height = bounds.size.height;
+            result.isValid = true;
+            break;
+        }
+
+        CFRelease(windowList);
+        return result;
+    }
+}
+
+// Enumerate all visible windows suitable for snapping
+// Returns the count of windows found (up to MAX_WINDOW_LIST)
+// Windows are returned in Z-order (front to back)
+// outWindows must be pre-allocated with MAX_WINDOW_LIST entries
+int MacOS_EnumerateWindows(WindowInfo* outWindows) {
+    @autoreleasepool {
+        if (outWindows == NULL) return 0;
+
+        // Initialize all entries as invalid
+        for (int i = 0; i < MAX_WINDOW_LIST; i++) {
+            outWindows[i].isValid = false;
+        }
+
+        int myPID = [[NSProcessInfo processInfo] processIdentifier];
+
+        CFArrayRef windowList = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID
+        );
+
+        if (windowList == NULL) {
+            NSLog(@"MacOSWindowHelper: EnumerateWindows - could not get window list");
+            return 0;
+        }
+
+        int count = 0;
+
+        for (NSDictionary *info in (__bridge NSArray *)windowList) {
+            if (count >= MAX_WINDOW_LIST) break;
+
+            NSNumber *ownerPID = info[(id)kCGWindowOwnerPID];
+            int pid = [ownerPID intValue];
+
+            // Skip our own windows
+            if (pid == myPID) continue;
+
+            NSNumber *layer = info[(id)kCGWindowLayer];
+            // Skip non-standard layers (menu bar, status items, etc.)
+            // Layer 0 = normal windows, layer < 0 = background, layer > 0 = floating
+            if ([layer intValue] != 0) continue;
+
+            CGRect bounds;
+            if (!CGRectMakeWithDictionaryRepresentation((CFDictionaryRef)info[(id)kCGWindowBounds], &bounds)) {
+                continue;
+            }
+
+            // Skip tiny windows (menu items, tooltips, etc.)
+            if (bounds.size.width < 100 || bounds.size.height < 50) continue;
+
+            NSNumber *winNum = info[(id)kCGWindowNumber];
+
+            outWindows[count].windowNumber = [winNum intValue];
+            outWindows[count].ownerPID = pid;
+            outWindows[count].x = bounds.origin.x;
+            outWindows[count].y = bounds.origin.y;
+            outWindows[count].width = bounds.size.width;
+            outWindows[count].height = bounds.size.height;
+            outWindows[count].isValid = true;
+
+            count++;
+        }
+
+        CFRelease(windowList);
+
+        NSLog(@"MacOSWindowHelper: EnumerateWindows found %d eligible windows", count);
+        return count;
+    }
+}
+
+// Check if a specific window is still visible on screen
+bool MacOS_IsWindowVisible(int32_t windowNumber) {
+    @autoreleasepool {
+        if (windowNumber <= 0) return false;
+
+        CFArrayRef windowList = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID
+        );
+
+        if (windowList == NULL) return false;
+
+        bool found = false;
+        for (NSDictionary *info in (__bridge NSArray *)windowList) {
+            NSNumber *winNum = info[(id)kCGWindowNumber];
+            if ([winNum intValue] == windowNumber) {
+                found = true;
+                break;
+            }
+        }
+
+        CFRelease(windowList);
+        return found;
     }
 }
 

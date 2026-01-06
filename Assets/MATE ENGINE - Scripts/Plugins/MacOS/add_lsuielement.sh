@@ -42,6 +42,18 @@ echo "✓ Added LSUIElement=true to Info.plist"
 
 echo "✓ Ensured high resolution support is enabled"
 
+# Add Screen Recording permission usage description
+# This text appears in the permission prompt dialog
+SCREEN_RECORDING_DESC="This app needs Screen Recording permission to detect and interact with other application windows for avatar window-sitting features."
+/usr/libexec/PlistBuddy -c "Add :NSScreenCaptureUsageDescription string '$SCREEN_RECORDING_DESC'" "$PLIST_PATH" 2>/dev/null
+
+# If key already exists, update it
+if [ $? -ne 0 ]; then
+    /usr/libexec/PlistBuddy -c "Set :NSScreenCaptureUsageDescription '$SCREEN_RECORDING_DESC'" "$PLIST_PATH"
+fi
+
+echo "✓ Added Screen Recording permission description"
+
 # Verify the changes
 echo ""
 echo "Verification - LSUIElement value:"

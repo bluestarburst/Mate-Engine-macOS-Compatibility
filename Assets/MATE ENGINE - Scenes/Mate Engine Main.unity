@@ -8666,6 +8666,7 @@ GameObject:
   - component: {fileID: 330585544}
   - component: {fileID: 330585548}
   - component: {fileID: 330585549}
+  - component: {fileID: 330585550}
   m_Layer: 0
   m_Name: Main Camera
   m_TagString: MainCamera
@@ -8819,16 +8820,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 335a940718c0c4bea9da3b87b4e25770, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VRM_AOT_Fix
-  strongReference:
-    humanBone: 0
-    boneName: 
-    useDefaultValues: 0
-    min: {x: 0, y: 0, z: 0}
-    max: {x: 0, y: 0, z: 0}
-    center: {x: 0, y: 0, z: 0}
-    axisLength: 0
-  listReference: []
-  avatarDescReference: {fileID: 0}
+--- !u!114 &330585550
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 330585543}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 43af86c1f3ed54b61ac6b59ff0efaf5d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DebugVisualizer
+  characterBoxSize: 40
 --- !u!1 &348610079
 GameObject:
   m_ObjectHideFlags: 0
@@ -33263,7 +33267,7 @@ Light:
   serializedVersion: 11
   m_Type: 2
   m_Color: {r: 1, g: 0.26999998, b: 0.96203995, a: 1}
-  m_Intensity: 2.5639914e-29
+  m_Intensity: 2.0956834e-29
   m_Range: 0.5
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -75646,7 +75650,7 @@ Light:
   serializedVersion: 11
   m_Type: 2
   m_Color: {r: 0, g: 0.44799995, b: 1, a: 1}
-  m_Intensity: 5.127983e-29
+  m_Intensity: 4.1913667e-29
   m_Range: 1
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -99599,7 +99603,7 @@ Light:
   serializedVersion: 11
   m_Type: 2
   m_Color: {r: 0, g: 0.44799995, b: 1, a: 1}
-  m_Intensity: 3.845987e-29
+  m_Intensity: 3.143525e-29
   m_Range: 1
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
@@ -255942,7 +255946,7 @@ MonoBehaviour:
     groupID: ambi_lights
     exclusiveTags:
     - lights
-    fadeCurrentValue: 1.2819957e-29
+    fadeCurrentValue: 1.0478417e-29
     fadeTarget: 0
     isFading: 1
     hasYSet: 0
@@ -255966,7 +255970,7 @@ MonoBehaviour:
     groupID: ambi_lights
     exclusiveTags:
     - lights
-    fadeCurrentValue: 1.2819957e-29
+    fadeCurrentValue: 1.0478417e-29
     fadeTarget: 0
     isFading: 1
     hasYSet: 0
@@ -255990,7 +255994,7 @@ MonoBehaviour:
     groupID: ambi_lights
     exclusiveTags:
     - lights
-    fadeCurrentValue: 1.2819957e-29
+    fadeCurrentValue: 1.0478417e-29
     fadeTarget: 0
     isFading: 1
     hasYSet: 0
@@ -256524,6 +256528,10 @@ MonoBehaviour:
   useGuardZone: 1
   probeGuardPx: 150
   probeGuardGizmoColor: {r: 0, g: 0.35134554, b: 1, a: 1}
+  showDebugRects: 0
+  debugRectCharacterColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  debugRectWindowSnapColor: {r: 0, g: 1, b: 0, a: 0.7}
+  debugRectSnappedWindowColor: {r: 0, g: 1, b: 1, a: 1}
   blockSitIfBoolTrue:
   - isCustomDancing
   - isWaitingForDancing
@@ -284180,6 +284188,10 @@ MonoBehaviour:
   useGuardZone: 1
   probeGuardPx: 150
   probeGuardGizmoColor: {r: 0, g: 0.35134554, b: 1, a: 1}
+  showDebugRects: 0
+  debugRectCharacterColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+  debugRectWindowSnapColor: {r: 0, g: 1, b: 0, a: 0.7}
+  debugRectSnappedWindowColor: {r: 0, g: 1, b: 1, a: 1}
   blockSitIfBoolTrue:
   - isCustomDancing
   - isWaitingForDancing

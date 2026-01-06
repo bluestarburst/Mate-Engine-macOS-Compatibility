@@ -34,6 +34,12 @@ public class AvatarWindowHandler : MonoBehaviour
     public bool useGuardZone = true;
     public float probeGuardPx = 240f;
     public Color probeGuardGizmoColor = Color.cyan;
+    [Header("Debug Visualization")]
+    [Tooltip("Show debug rectangles at runtime for character position and window snap areas")]
+    public bool showDebugRects = false;
+    public Color debugRectCharacterColor = Color.yellow;
+    public Color debugRectWindowSnapColor = new Color(0f, 1f, 0f, 0.7f);
+    public Color debugRectSnappedWindowColor = Color.cyan;
     [Header("Sit Blockers")]
     public List<string> blockSitIfBoolTrue = new List<string>();
     readonly List<string> _blockSitValidNames = new List<string>();
@@ -91,6 +97,11 @@ public class AvatarWindowHandler : MonoBehaviour
     int _snapCursorY;
     bool wasDragging;
     IntPtr snappedHWND = IntPtr.Zero, unityHWND = IntPtr.Zero;
+#if UNITY_STANDALONE_OSX
+    int _snappedWindowNumber = 0;  // macOS CGWindowNumber for tracking the snapped window
+    MacOSWindowHelper.WindowInfo[] _cachedMacOSWindows;  // Cached window list for macOS
+    float _nextMacOSEnumTime;
+#endif
     Vector2 lastDesktopPosition;
     readonly List<WindowEntry> cachedWindows = new List<WindowEntry>(128);
     readonly List<WindowEntry> activeOccluders = new List<WindowEntry>(16);
@@ -123,10 +134,35 @@ public class AvatarWindowHandler : MonoBehaviour
     int _lastSnapTopY;
     uint _currentPid;
     float _guardRadiusSq;
+    // Debug visualization cached data
+    Vector2 _debugCharacterDesktopPos;
+    Rect _debugSnappedWindowRect;
+    readonly List<Rect> _debugWindowSnapRects = new List<Rect>(32);
+    Material _debugLineMaterial;
+    static readonly int DeltaPanicThreshold = 10000;
     void Start()
     {
+#if UNITY_STANDALONE_OSX
+        UnityEngine.Debug.LogWarning("[AWH-macOS] AvatarWindowHandler.Start() - UNITY_STANDALONE_OSX defined (BUILD)");
+#elif UNITY_EDITOR_OSX
+        UnityEngine.Debug.LogWarning("[AWH-macOS] AvatarWindowHandler.Start() - UNITY_EDITOR_OSX defined (EDITOR) - macOS code will NOT run!");
+#else
+        UnityEngine.Debug.LogWarning("[AWH-macOS] AvatarWindowHandler.Start() - NO macOS defines!");
+#endif
+
+#if UNITY_STANDALONE_WIN
         unityHWND = Process.GetCurrentProcess().MainWindowHandle;
         _currentPid = GetCurrentProcessId();
+#elif UNITY_STANDALONE_OSX
+        // macOS: No HWND concept, use placeholder since we use UniWindowController
+        unityHWND = new IntPtr(1); // Non-zero placeholder
+        _currentPid = (uint)Process.GetCurrentProcess().Id;
+        UnityEngine.Debug.Log($"[AWH-macOS] Start: unityHWND set to placeholder, pid={_currentPid}");
+#else
+        unityHWND = Process.GetCurrentProcess().MainWindowHandle;
+        _currentPid = GetCurrentProcessId();
+#endif
+
         animator = GetComponent<Animator>();
         controller = GetComponent<AvatarAnimatorController>();
         if (targetCamera == null) targetCamera = Camera.main;
@@ -145,6 +181,9 @@ public class AvatarWindowHandler : MonoBehaviour
         _lastSnapTopY = int.MinValue;
         cachedWindows.Capacity = Mathf.Max(cachedWindows.Capacity, 128);
         activeOccluders.Capacity = Mathf.Max(activeOccluders.Capacity, maxOtherQuads);
+
+        // Ensure Unity window starts on screen
+        EnsureWindowOnScreen();
     }
     void OnDisable()
     {
@@ -175,18 +214,67 @@ public class AvatarWindowHandler : MonoBehaviour
     }
     void Update()
     {
-#if !UNITY_STANDALONE_WIN
+#if UNITY_STANDALONE_OSX && !UNITY_EDITOR
+        // CRITICAL: Log once at start to confirm this code is even compiled in
+        if (Time.frameCount == 1)
+        {
+            UnityEngine.Debug.LogWarning("[AWH-macOS] !!!!! AvatarWindowHandler Update() IS RUNNING IN BUILD !!!!!");
+        }
+#endif
+        
+#if !UNITY_STANDALONE_WIN && !UNITY_STANDALONE_OSX
         return;
-#else
+#endif
+        
+#if UNITY_STANDALONE_OSX
+        // Log once per second to confirm Update is running
+        if (Time.frameCount % 60 == 0)
+        {
+            UnityEngine.Debug.Log($"[AWH-macOS] Update running: controller={controller != null}, isDragging={controller?.isDragging}, snappedHWND={snappedHWND}");
+        }
+#endif
+        
+        if (controller == null) return;
+
+#if UNITY_STANDALONE_WIN || UNITY_STANDALONE_OSX
         if (snappedHWND != IntPtr.Zero)
         {
             if ((transform.lossyScale - _prevLossyScale).sqrMagnitude > 1e-8f) { _snapSmoothingActive = false; _snapVelX = _snapVelY = 0f; }
             _prevLossyScale = transform.lossyScale;
         }
 
-        if (unityHWND == IntPtr.Zero || animator == null || controller == null) return;
-        if (!SaveLoadHandler.Instance.data.enableWindowSitting) { ClearSnapAndHide(); return; }
-        if (IsSitBlocked()) { if (snappedHWND != IntPtr.Zero) ClearSnapAndHide(); return; }
+        if (unityHWND == IntPtr.Zero || animator == null || controller == null) 
+        {
+#if UNITY_STANDALONE_OSX
+            if (Time.frameCount % 120 == 0)
+            {
+                UnityEngine.Debug.LogError($"[AWH-macOS] Early return: unityHWND={unityHWND}, animator={animator != null}, controller={controller != null}");
+            }
+#endif
+            return;
+        }
+        if (!SaveLoadHandler.Instance.data.enableWindowSitting) 
+        { 
+#if UNITY_STANDALONE_OSX
+            if (Time.frameCount % 120 == 0) // Log every 2 seconds
+            {
+                UnityEngine.Debug.LogError("[AWH-macOS] Window sitting is DISABLED in settings! Enable it to use this feature.");
+            }
+#endif
+            ClearSnapAndHide(); 
+            return; 
+        }
+        if (IsSitBlocked()) 
+        { 
+#if UNITY_STANDALONE_OSX
+            if (Time.frameCount % 120 == 0)
+            {
+                UnityEngine.Debug.LogError("[AWH-macOS] Early return: IsSitBlocked() is true");
+            }
+#endif
+            if (snappedHWND != IntPtr.Zero) ClearSnapAndHide(); 
+            return; 
+        }
 
         bool isWindowSitNow = animator.GetBool("isWindowSit");
         if (isWindowSitNow && !wasSitting) animator.SetFloat(windowSitIndexParam, UnityEngine.Random.Range(0, totalWindowSitAnimations));
@@ -202,15 +290,28 @@ public class AvatarWindowHandler : MonoBehaviour
 
         if (controller.isDragging && !wasDragging)
         {
+#if UNITY_STANDALONE_WIN
             Kirurobo.WinApi.POINT cp;
             if (Kirurobo.WinApi.GetCursorPos(out cp))
             {
                 _dragStartCursorX = cp.x; _dragStartCursorY = cp.y;
                 if (snappedHWND != IntPtr.Zero && isWindowSitNow) _snapCursorY = cp.y;
             }
+#elif UNITY_STANDALONE_OSX
+            // macOS: Cursor position not needed for snap detection
+            UnityEngine.Debug.LogWarning("[AWH-macOS] ===== DRAG STARTED =====");
+#endif
             _dragStartTime = Time.unscaledTime;
             _canSitHold = false;
         }
+#if UNITY_STANDALONE_OSX
+        else if (controller.isDragging && wasDragging && Time.frameCount % 30 == 0)
+        {
+            // Debug: we're dragging but drag was already started
+            float elapsed = Time.unscaledTime - _dragStartTime;
+            UnityEngine.Debug.Log($"[AWH-macOS] Dragging (ongoing): elapsed={elapsed:F2}s, _canSitHold={_canSitHold}, threshold={minDragHoldSecondsToSit}");
+        }
+#endif
         if (controller.isDragging)
         {
             if (!_canSitHold && _dragStartTime >= 0f && Time.unscaledTime - _dragStartTime >= minDragHoldSecondsToSit) _canSitHold = true;
@@ -233,6 +334,7 @@ public class AvatarWindowHandler : MonoBehaviour
 
         if (snappedHWND != IntPtr.Zero)
         {
+#if UNITY_STANDALONE_WIN
             bool handled = false;
             for (int i = 0; i < cachedWindows.Count; i++)
             {
@@ -241,14 +343,54 @@ public class AvatarWindowHandler : MonoBehaviour
                 if (IsWindowMaximized(win.hwnd) || IsWindowFullscreen(win)) { ClearSnapAndHide(); handled = true; break; }
             }
             if (!handled && (IsIconic(snappedHWND) || IsCloaked(snappedHWND))) { ClearSnapAndHide(); }
+#elif UNITY_STANDALONE_OSX
+            // macOS: Check if the SPECIFIC snapped window is still visible
+            if (_snappedWindowNumber > 0)
+            {
+                if (!MacOSWindowHelper.IsWindowVisible(_snappedWindowNumber))
+                {
+                    UnityEngine.Debug.Log($"[AWH-macOS] Snapped window #{_snappedWindowNumber} is no longer visible");
+                    ClearSnapAndHide();
+                }
+            }
+            else
+            {
+                // No valid window number stored, clear snap
+                ClearSnapAndHide();
+            }
+#endif
         }
         if (controller.isDragging)
         {
-            if (snappedHWND == IntPtr.Zero) { if (_canSitHold && DraggedPastSnapThreshold()) TrySnap(); }
+            if (snappedHWND == IntPtr.Zero) 
+            {
+#if UNITY_STANDALONE_OSX
+                // Debug why TrySnap isn't being called
+                bool canSit = _canSitHold;
+                bool dragPast = DraggedPastSnapThreshold();
+                if (Time.frameCount % 30 == 0) // Log every half second
+                {
+                    UnityEngine.Debug.LogWarning($"[AWH-macOS] Dragging but not snapping: _canSitHold={canSit}, DraggedPast={dragPast}");
+                }
+#endif
+                if (_canSitHold && DraggedPastSnapThreshold()) 
+                {
+                    UnityEngine.Debug.Log("[AWH-macOS] Update: calling TrySnap during drag");
+                    TrySnap();
+                }
+                else
+                {
+                    UnityEngine.Debug.LogWarning($"[AWH-macOS] Update: NOT calling TrySnap - _canSitHold={_canSitHold}, DraggedPast={DraggedPastSnapThreshold()}");
+                }
+            }
             else if (!IsStillNearSnappedWindow()) { SetGuardZoneFromCurrent(); ClearSnapAndHide(true); }
             else FollowSnapped(true);
         }
         else if (!controller.isDragging && snappedHWND != IntPtr.Zero) FollowSnapped(false);
+        else if (!controller.isDragging)
+        {
+            UnityEngine.Debug.LogWarning("[AWH-macOS] Update: controller.isDragging = false");
+        }
         if (animator.GetBool("isBigScreenAlarm"))
         {
             if (isWindowSitNow) animator.SetBool("isWindowSit", false);
@@ -260,6 +402,7 @@ public class AvatarWindowHandler : MonoBehaviour
             if (_postSettleFrames > 0) _postSettleFrames--;
             else
             {
+#if UNITY_STANDALONE_WIN
                 if (GetWindowRect(snappedHWND, out RECT tr))
                 {
                     CalibrateSeatAnchorToDesktopY(tr.Top + seatOffsetPx);
@@ -273,6 +416,27 @@ public class AvatarWindowHandler : MonoBehaviour
                     _havePrevSnapRect = false;
                     PinToTarget(tr);
                 }
+#elif UNITY_STANDALONE_OSX
+                // Use stored window ID to get the SPECIFIC window we snapped to
+                if (_snappedWindowNumber > 0)
+                {
+                    var winInfo = MacOSWindowHelper.GetWindowByNumber(_snappedWindowNumber);
+                    if (winInfo.isValid)
+                    {
+                        RECT tr = winInfo.ToRECT();
+                        CalibrateSeatAnchorToDesktopY(tr.Top + seatOffsetPx);
+                        if (ComputeSeatDesktop(out float px2, out _))
+                        {
+                            float w = Mathf.Max(1, tr.Right - tr.Left);
+                            snapFraction = Mathf.Clamp01((px2 - tr.Left) / w);
+                        }
+                        _snapSmoothingActive = enableSnapSmoothing;
+                        _snapVelX = _snapVelY = 0f;
+                        _havePrevSnapRect = false;
+                        PinToTarget(tr);
+                    }
+                }
+#endif
                 _postSettleRecalib = false;
             }
         }
@@ -282,9 +446,16 @@ public class AvatarWindowHandler : MonoBehaviour
     void LateUpdate() { UpdateOccluderQuadsFrameSync(); }
     bool DraggedPastSnapThreshold()
     {
+#if UNITY_STANDALONE_WIN
         Kirurobo.WinApi.POINT cp;
         if (!Kirurobo.WinApi.GetCursorPos(out cp)) return true;
         return Mathf.Abs(cp.x - _dragStartCursorX) >= minDragPixelsToSnap || Mathf.Abs(cp.y - _dragStartCursorY) >= minDragPixelsToSnap;
+#elif UNITY_STANDALONE_OSX
+        // macOS: Always allow snapping by drag movement (platform doesn't require cursor checks)
+        return true;
+#else
+        return true;
+#endif
     }
     void SetGuardZoneFromCurrent()
     {
@@ -313,10 +484,24 @@ public class AvatarWindowHandler : MonoBehaviour
         _haveUnityCli = true; _lastUnityCli = uCli;
         Vector3 sp = targetCamera.WorldToScreenPoint(wp);
         if (sp.z < 0.01f) return false;
+
+#if UNITY_STANDALONE_OSX && !UNITY_EDITOR
+        // macOS: Use same ratio-based calculation as Windows
+        // This accounts for any difference between camera viewport and actual window size
+        // Map Unity screen space position to actual window client area
         float clientW = Mathf.Max(1f, uCli.Right - uCli.Left);
         float clientH = Mathf.Max(1f, uCli.Bottom - uCli.Top);
         px = uCli.Left + Mathf.Clamp(sp.x, 0, targetCamera.pixelWidth) * (clientW / Mathf.Max(1, targetCamera.pixelWidth));
         py = uCli.Top + (targetCamera.pixelHeight - Mathf.Clamp(sp.y, 0, targetCamera.pixelHeight)) * (clientH / Mathf.Max(1, targetCamera.pixelHeight));
+
+        UnityEngine.Debug.Log($"[Coord] sp=({sp.x:F0},{sp.y:F0}) clientW={clientW:F0} clientH={clientH:F0} camW={targetCamera.pixelWidth} camH={targetCamera.pixelHeight} uCli=({uCli.Left},{uCli.Top},{uCli.Right},{uCli.Bottom}) result=({px:F0},{py:F0})");
+#else
+        // Windows: Original logic (already in same coordinate space)
+        float clientW = Mathf.Max(1f, uCli.Right - uCli.Left);
+        float clientH = Mathf.Max(1f, uCli.Bottom - uCli.Top);
+        px = uCli.Left + Mathf.Clamp(sp.x, 0, targetCamera.pixelWidth) * (clientW / Mathf.Max(1, targetCamera.pixelWidth));
+        py = uCli.Top + (targetCamera.pixelHeight - Mathf.Clamp(sp.y, 0, targetCamera.pixelHeight)) * (clientH / Mathf.Max(1, targetCamera.pixelHeight));
+#endif
         return true;
     }
     void CacheRigRefs()
@@ -366,6 +551,9 @@ public class AvatarWindowHandler : MonoBehaviour
         if (controller != null && controller.isDragging) _recentUnsnap = true;
         if (fromUnsnap) _unsnapCooldownUntil = Time.unscaledTime + Mathf.Max(0f, unsnapCooldownSeconds);
         snappedHWND = IntPtr.Zero;
+#if UNITY_STANDALONE_OSX
+        _snappedWindowNumber = 0;  // Reset macOS window ID
+#endif
         seatCalibrated = false;
         if (animator != null) { animator.SetBool("isWindowSit", false); animator.SetBool("isTaskbarSit", false); }
         SetTopMost(SaveLoadHandler.Instance != null ? SaveLoadHandler.Instance.data.isTopmost : true);
@@ -376,6 +564,7 @@ public class AvatarWindowHandler : MonoBehaviour
 
     void UpdateCachedWindows()
     {
+#if UNITY_STANDALONE_WIN
         cachedWindows.Clear();
         EnumWindows((hWnd, lParam) =>
         {
@@ -388,9 +577,13 @@ public class AvatarWindowHandler : MonoBehaviour
             cachedWindows.Add(new WindowEntry { hwnd = hWnd, rect = r, isTaskbar = false });
             return true;
         }, IntPtr.Zero);
+#elif UNITY_STANDALONE_OSX
+        // macOS: Window enumeration not needed; we track the active window directly via MacOSWindowTracker
+#endif
     }
     void RebuildActiveOccluders()
     {
+#if UNITY_STANDALONE_WIN
         activeOccluders.Clear();
         for (int i = 0; i < cachedWindows.Count && activeOccluders.Count < maxOtherQuads; i++)
         {
@@ -401,6 +594,10 @@ public class AvatarWindowHandler : MonoBehaviour
             if (!(w.isTaskbar || IsAboveInZOrder(w.hwnd, snappedHWND))) continue;
             activeOccluders.Add(w);
         }
+#elif UNITY_STANDALONE_OSX
+        // macOS: Occlusion is handled by native window management; keep list for compatibility
+        activeOccluders.Clear();
+#endif
     }
     bool IsSitEligibleWindow(IntPtr hWnd, RECT r, System.Text.StringBuilder cls)
     {
@@ -421,6 +618,7 @@ public class AvatarWindowHandler : MonoBehaviour
     }
     void TrySnap()
     {
+#if UNITY_STANDALONE_WIN
         if (Time.unscaledTime < _unsnapCooldownUntil) return;
         if (IsSitBlocked()) return;
         if (useGuardZone && _guardZoneActive && ComputeZoneDesktop(out float gx, out float gy))
@@ -439,6 +637,10 @@ public class AvatarWindowHandler : MonoBehaviour
 
         int spr = ScaledProbeRadiusI();
         float sprF = spr;
+        
+        // Update debug visualization with current character position and window rects
+        UpdateDebugData(px, py);
+        UpdateDebugWindowRects();
 
         for (int i = 0; i < cachedWindows.Count; i++)
         {
@@ -483,9 +685,113 @@ public class AvatarWindowHandler : MonoBehaviour
             _havePrevSnapRect = false;
 
             RebuildActiveOccluders(); UpdateOccluderQuadsFrameSync();
-            if (GetWindowRect(win.hwnd, out RECT tr)) PinToTarget(tr); else PinToTarget(win.rect);
+            if (GetWindowRect(win.hwnd, out RECT tr)) 
+            {
+                UpdateDebugData(px, py, tr);  // Update debug with snapped window
+                PinToTarget(tr); 
+            }
+            else 
+            {
+                UpdateDebugData(px, py, win.rect);  // Update debug with snapped window
+                PinToTarget(win.rect);
+            }
             return;
         }
+#elif UNITY_STANDALONE_OSX
+        // macOS: Enumerate windows and snap to the one the character is near (like Windows version)
+        UnityEngine.Debug.Log("[AWH-macOS] TrySnap called");
+        if (Time.unscaledTime < _unsnapCooldownUntil)
+        {
+            UnityEngine.Debug.LogWarning($"[AWH-macOS] TrySnap: cooldown {_unsnapCooldownUntil - Time.unscaledTime:F2}s");
+            return;
+        }
+        if (IsSitBlocked())
+        {
+            UnityEngine.Debug.LogWarning("[AWH-macOS] TrySnap: sit blocked");
+            return;
+        }
+
+        if (!ComputeZoneDesktop(out float px, out float py))
+        {
+            UnityEngine.Debug.LogWarning("[AWH-macOS] TrySnap: compute zone failed");
+            return;
+        }
+        UnityEngine.Debug.Log($"[AWH-macOS] TrySnap: zone px:{px:F0} py:{py:F0}");
+
+        if (_recentUnsnap)
+        {
+            int vBlock = Mathf.Max(unsnapVerticalBand, ScaledProbeRadiusI());
+            if (Mathf.Abs(py - _lastSnapTopY) < vBlock) return;
+        }
+
+        int spr = ScaledProbeRadiusI();
+        float sprF = spr;
+
+        // Enumerate all windows and find one to snap to (similar to Windows cachedWindows approach)
+        _cachedMacOSWindows = MacOSWindowHelper.EnumerateWindows();
+        UnityEngine.Debug.Log($"[AWH-macOS] TrySnap: found {_cachedMacOSWindows.Length} windows");
+        
+        // Update debug visualization with current character position and window rects
+        UpdateDebugData(px, py);
+        UpdateDebugWindowRects();
+
+        for (int i = 0; i < _cachedMacOSWindows.Length; i++)
+        {
+            var win = _cachedMacOSWindows[i];
+            if (!win.isValid) continue;
+
+            int left = (int)win.x;
+            int right = (int)(win.x + win.width);
+            int top = (int)win.y;
+
+            // Check if character X is within window bounds
+            if (!(px >= left && px <= right)) continue;
+
+            // Check if character Y is near the top of the window
+            if (Mathf.Abs(py - top) > sprF) continue;
+
+            UnityEngine.Debug.Log($"[AWH-macOS] ===== SNAPPING TO WINDOW #{win.windowNumber} (PID:{win.ownerPID}) =====");
+            UnityEngine.Debug.Log($"[AWH-macOS] Window bounds: L:{left} T:{top} R:{right} B:{(int)(win.y + win.height)}");
+
+            // Store the window number so we can track THIS specific window
+            _snappedWindowNumber = win.windowNumber;
+            snappedHWND = new IntPtr(win.windowNumber); // Store window number in snappedHWND for compatibility
+            _guardZoneActive = false;
+
+            animator.SetBool("isWindowSit", true);
+            animator.SetBool("isTaskbarSit", false); // macOS doesn't have Windows taskbar
+            animator.Update(0f);
+            CalibrateSeatAnchorToDesktopY(top + seatOffsetPx);
+
+            _postSettleFrames = 1;
+            _postSettleRecalib = true;
+
+            if (ComputeSeatDesktop(out float px2, out _))
+            {
+                float w = Mathf.Max(1, right - left);
+                snapFraction = Mathf.Clamp01((px2 - left) / w);
+            }
+
+            _lastSnapTopY = top;
+            _recentUnsnap = false;
+            SetTopMost(true);
+
+            _guard = Mathf.Max(1, snapGuardFrames);
+            _latch = Mathf.Max(1, snapLatchFrames);
+
+            _snapSmoothingActive = enableSnapSmoothing;
+            _snapVelX = _snapVelY = 0f;
+            _havePrevSnapRect = false;
+
+            UpdateOccluderQuadsFrameSync();
+            RECT tr = win.ToRECT();
+            UpdateDebugData(px, py, tr);  // Update debug with snapped window
+            PinToTarget(tr);
+            return; // Found a window to snap to, exit
+        }
+
+        UnityEngine.Debug.Log("[AWH-macOS] TrySnap: no suitable window found near character");
+#endif
     }
     void CancelSnapSmoothingIfTargetMoved(RECT tr)
     {
@@ -557,7 +863,15 @@ public class AvatarWindowHandler : MonoBehaviour
     }
     void FollowSnapped(bool dragging)
     {
+#if UNITY_STANDALONE_WIN
         if (snappedHWND == IntPtr.Zero || !GetWindowRect(snappedHWND, out RECT tr)) { ClearSnapAndHide(); return; }
+        
+        // Update debug visualization
+        if (ComputeZoneDesktop(out float dbgPx, out float dbgPy))
+        {
+            UpdateDebugData(dbgPx, dbgPy, tr);
+        }
+        
         CancelSnapSmoothingIfTargetMoved(tr);
         if (dragging && ComputeSeatDesktop(out float px, out _))
         {
@@ -565,6 +879,41 @@ public class AvatarWindowHandler : MonoBehaviour
             snapFraction = Mathf.Clamp01((px - tr.Left) / ww);
         }
         PinToTarget(tr); SetTopMost(true);
+#elif UNITY_STANDALONE_OSX
+        // macOS: Use stored window number to track the SPECIFIC window we snapped to
+        if (_snappedWindowNumber <= 0)
+        {
+            UnityEngine.Debug.LogWarning("[AWH-macOS] FollowSnapped: No window number stored");
+            ClearSnapAndHide();
+            return;
+        }
+
+        // Get the current bounds of the snapped window by its ID
+        var winInfo = MacOSWindowHelper.GetWindowByNumber(_snappedWindowNumber);
+        if (!winInfo.isValid)
+        {
+            UnityEngine.Debug.LogWarning($"[AWH-macOS] FollowSnapped: Window #{_snappedWindowNumber} no longer visible");
+            ClearSnapAndHide();
+            return;
+        }
+
+        RECT tr = winInfo.ToRECT();
+        
+        // Update debug visualization
+        if (ComputeZoneDesktop(out float dbgPx, out float dbgPy))
+        {
+            UpdateDebugData(dbgPx, dbgPy, tr);
+        }
+        
+        CancelSnapSmoothingIfTargetMoved(tr);
+        if (dragging && ComputeSeatDesktop(out float px, out _))
+        {
+            float ww = Mathf.Max(1, tr.Right - tr.Left);
+            snapFraction = Mathf.Clamp01((px - tr.Left) / ww);
+        }
+        PinToTarget(tr);
+        SetTopMost(true);
+#endif
     }
     void PinToTarget(RECT r)
     {
@@ -575,6 +924,17 @@ public class AvatarWindowHandler : MonoBehaviour
         int dx = Mathf.RoundToInt(desiredPX - px);
         int dy = Mathf.RoundToInt(desiredPY - py);
 
+        int absDx = Mathf.Abs(dx);
+        int absDy = Mathf.Abs(dy);
+        if (absDx > DeltaPanicThreshold || absDy > DeltaPanicThreshold)
+        {
+            UnityEngine.Debug.LogError($"[AWH-macOS] PinToTarget panic: dx={dx} dy={dy} exceeds {DeltaPanicThreshold}. Forcing crash to capture state.");
+            ClearSnapAndHide(true);
+            UnityEngine.Diagnostics.Utils.ForceCrash(UnityEngine.Diagnostics.ForcedCrashCategory.FatalError);
+            return;
+        }
+
+#if UNITY_STANDALONE_WIN
         GetWindowRect(unityHWND, out RECT ur);
         int w = ur.Right - ur.Left, h = ur.Bottom - ur.Top;
         int targetX = ur.Left + dx, targetY = ur.Top + dy;
@@ -603,9 +963,107 @@ public class AvatarWindowHandler : MonoBehaviour
         int nx = Mathf.RoundToInt(nextX), ny = Mathf.RoundToInt(nextY);
         if (Mathf.Abs(targetX - nx) <= 1 && Mathf.Abs(targetY - ny) <= 1) { nx = targetX; ny = targetY; _snapSmoothingActive = false; _snapVelX = _snapVelY = 0f; }
         if (nx != ur.Left || ny != ur.Top) MoveWindow(unityHWND, nx, ny, w, h, true);
+#elif UNITY_STANDALONE_OSX
+        // macOS: All coordinates are now in POINTS (CGWindowList uses points, not device pixels)
+        var winController = Kirurobo.UniWindowController.current;
+        if (winController == null)
+        {
+            UnityEngine.Debug.LogError("[AWH-macOS] PinToTarget: No UniWindowController");
+            return;
+        }
+
+        // Get Unity window position in CoreGraphics coordinates (top-left origin, POINTS)
+        var unityRect = MacOSWindowHelper.GetUnityWindowBounds();
+        if (!unityRect.isValid)
+        {
+            UnityEngine.Debug.LogError("[AWH-macOS] PinToTarget: unity rect invalid");
+            return;
+        }
+
+        float curX = unityRect.x;  // Current X in CG points
+        float curY = unityRect.y;  // Current Y in CG points (top-left origin)
+        float winWidth = unityRect.width;
+        float winHeight = unityRect.height;
+
+        // dx, dy are in POINTS (from ComputeDesktopFromWorld which now uses points)
+        // But wait - dx/dy come from the RECT which uses device pixels from CGWindowList
+        // Actually CGWindowList returns points, so dx/dy should be in points now too
+        float targetX = curX + dx;
+        float targetY = curY + dy;
+
+        UnityEngine.Debug.Log($"[AWH-macOS] PinToTarget: cur=({curX:F0},{curY:F0}) delta=({dx},{dy}) target=({targetX:F0},{targetY:F0})");
+
+        // Get screen height for coordinate conversion (CG to Cocoa)
+        // NOTE: We do NOT clamp here to match Windows behavior - the window follows the target
+        // exactly like Windows does. EnsureWindowOnScreen handles keeping it visible separately.
+        var screenBounds = MacOSWindowHelper.GetScreenBounds();
+        float screenHeight = screenBounds.isValid ? screenBounds.height : 1117f; // fallback
+
+        // Tolerance to avoid sub-pixel flickering from coordinate rounding
+        const float moveTolerance = 2f; // Don't move for sub-2-point differences
+
+        if (!_snapSmoothingActive || !enableSnapSmoothing)
+        {
+            // Check if the target is actually different from current position
+            float actualDeltaX = targetX - curX;
+            float actualDeltaY = targetY - curY;
+
+            if (Mathf.Abs(actualDeltaX) > moveTolerance || Mathf.Abs(actualDeltaY) > moveTolerance)
+            {
+                // Convert from CoreGraphics (top-left origin) to Cocoa (bottom-left origin)
+                // Both are in POINTS now, just need to flip Y
+                // Cocoa Y = screenHeight - CG_Y - windowHeight
+                float cocoaX = targetX;
+                float cocoaY = screenHeight - targetY - winHeight;
+                Vector2 newPos = new Vector2(cocoaX, cocoaY);
+                UnityEngine.Debug.Log($"[AWH-macOS] PinToTarget MOVE: CG({targetX:F0},{targetY:F0}) -> Cocoa({cocoaX:F0},{cocoaY:F0}) actualDelta=({actualDeltaX:F1},{actualDeltaY:F1})");
+                winController.windowPosition = newPos;
+            }
+            return;
+        }
+
+        float dt = Time.unscaledDeltaTime;
+        float nextX = Mathf.SmoothDamp(curX, targetX, ref _snapVelX, snapSmoothingTime, snapSmoothingMaxSpeed, dt);
+        float nextY = Mathf.SmoothDamp(curY, targetY, ref _snapVelY, snapSmoothingTime, snapSmoothingMaxSpeed, dt);
+
+        if (controller != null && this.controller.isDragging)
+        {
+            float predictedSeatY = py + (nextY - curY);
+            float afterError = predictedSeatY - desiredPY;
+            if (afterError > 0f)
+            {
+                float maxStep = snapSmoothingMaxSpeed * dt;
+                float need = Mathf.Max(0f, afterError - 1f);
+                nextY -= Mathf.Min(maxStep, need);
+            }
+        }
+
+        // NOTE: No clamping here to match Windows behavior - follow the target exactly
+
+        if (Mathf.Abs(targetX - nextX) <= 1 && Mathf.Abs(targetY - nextY) <= 1)
+        {
+            nextX = targetX;
+            nextY = targetY;
+            _snapSmoothingActive = false;
+            _snapVelX = _snapVelY = 0f;
+        }
+
+        // Use same tolerance as non-smoothing branch to prevent sub-pixel flickering
+        if (Mathf.Abs(nextX - curX) > moveTolerance || Mathf.Abs(nextY - curY) > moveTolerance)
+        {
+            // Convert from CoreGraphics (top-left origin) to Cocoa (bottom-left origin)
+            // Both in POINTS, just flip Y
+            float cocoaX = nextX;
+            float cocoaY = screenHeight - nextY - winHeight;
+            Vector2 newPos = new Vector2(cocoaX, cocoaY);
+            UnityEngine.Debug.Log($"[AWH-macOS] PinToTarget SMOOTH: CG({nextX:F0},{nextY:F0}) -> Cocoa({cocoaX:F0},{cocoaY:F0})");
+            winController.windowPosition = newPos;
+        }
+#endif
     }
     bool IsStillNearSnappedWindow()
     {
+#if UNITY_STANDALONE_WIN
         if (_latch > 0) { _latch--; return true; }
         if (_guard > 0) { _guard--; return true; }
 
@@ -629,6 +1087,12 @@ public class AvatarWindowHandler : MonoBehaviour
             return true;
         }
         return false;
+#elif UNITY_STANDALONE_OSX
+        // macOS: Always consider the window still nearby while snapped (continuous tracking via active window)
+        return true;
+#else
+        return false;
+#endif
     }
     bool IsOccludedByHigherWindowsAtPoint(IntPtr hwnd, int x, int y)
     {
@@ -882,16 +1346,141 @@ public class AvatarWindowHandler : MonoBehaviour
         if (xMax <= xMin || yMax <= yMin) return new Rect(0, 0, 0, 0);
         return new Rect(xMin, yMin, xMax - xMin, yMax - yMin);
     }
-    Vector2 GetUnityWindowPosition() { GetWindowRect(unityHWND, out RECT r); return new Vector2(r.Left, r.Top); }
+    Vector2 GetUnityWindowPosition()
+    {
+#if UNITY_STANDALONE_WIN
+        GetWindowRect(unityHWND, out RECT r);
+        return new Vector2(r.Left, r.Top);
+#elif UNITY_STANDALONE_OSX
+        // On macOS, use Screen position (Unity window is at screen origin in our transparent setup)
+        return new Vector2(0, 0);
+#else
+        return Vector2.zero;
+#endif
+    }
+    
     bool GetUnityClientRect(out RECT r)
     {
         r = new RECT();
+#if UNITY_STANDALONE_WIN
         if (!GetClientRect(unityHWND, out RECT client)) return false;
         POINT p = new POINT { X = 0, Y = 0 };
         if (!ClientToScreen(unityHWND, ref p)) return false;
         r.Left = p.X; r.Top = p.Y; r.Right = p.X + client.Right; r.Bottom = p.Y + client.Bottom;
         return true;
+#elif UNITY_STANDALONE_OSX
+        // On macOS, get the Unity window bounds from the native code using the same coordinate system
+        // as the active window detection (CoreGraphics: top-left origin, Y increases downward)
+        var boundsResult = MacOSWindowHelper.GetUnityWindowBounds();
+        if (!boundsResult.isValid)
+        {
+            UnityEngine.Debug.LogWarning("[AWH-macOS] GetUnityClientRect: Could not get Unity window bounds from native code");
+            return false;
+        }
+        
+        r.Left = (int)boundsResult.x;
+        r.Top = (int)boundsResult.y;
+        r.Right = (int)(boundsResult.x + boundsResult.width);
+        r.Bottom = (int)(boundsResult.y + boundsResult.height);
+        return true;
+#else
+        return false;
+#endif
     }
+    void EnsureWindowOnScreen()
+    {
+#if UNITY_STANDALONE_WIN
+        if (unityHWND == IntPtr.Zero) return;
+
+        GetWindowRect(unityHWND, out RECT ur);
+        int windowWidth = ur.Right - ur.Left;
+        int windowHeight = ur.Bottom - ur.Top;
+
+        // Get primary screen bounds (simple approach for Windows)
+        int screenWidth = Screen.currentResolution.width;
+        int screenHeight = Screen.currentResolution.height;
+
+        // Allow 80% off-screen, keep 20% visible
+        int minVisibleWidth = Mathf.Max(100, windowWidth / 5);
+        int minVisibleHeight = Mathf.Max(100, windowHeight / 5);
+
+        int minX = -windowWidth + minVisibleWidth;
+        int maxX = screenWidth - minVisibleWidth;
+        int minY = -windowHeight + minVisibleHeight;
+        int maxY = screenHeight - minVisibleHeight;
+
+        int clampedX = Mathf.Clamp(ur.Left, minX, maxX);
+        int clampedY = Mathf.Clamp(ur.Top, minY, maxY);
+
+        if (clampedX != ur.Left || clampedY != ur.Top)
+        {
+            UnityEngine.Debug.Log($"[AWH] EnsureWindowOnScreen: Moving window from ({ur.Left},{ur.Top}) to ({clampedX},{clampedY})");
+            MoveWindow(unityHWND, clampedX, clampedY, windowWidth, windowHeight, true);
+        }
+#elif UNITY_STANDALONE_OSX
+        // macOS: All coordinates are now in POINTS (CGWindowList uses points, not device pixels)
+        var winController = Kirurobo.UniWindowController.current;
+        if (winController == null)
+        {
+            UnityEngine.Debug.LogWarning("[AWH-macOS] EnsureWindowOnScreen: No UniWindowController");
+            return;
+        }
+
+        var unityRect = MacOSWindowHelper.GetUnityWindowBounds();
+        if (!unityRect.isValid)
+        {
+            UnityEngine.Debug.LogWarning("[AWH-macOS] EnsureWindowOnScreen: Unity window bounds invalid");
+            return;
+        }
+
+        var screenBounds = MacOSWindowHelper.GetScreenBounds();
+        if (!screenBounds.isValid)
+        {
+            UnityEngine.Debug.LogWarning("[AWH-macOS] EnsureWindowOnScreen: Screen bounds invalid");
+            return;
+        }
+
+        // All values in POINTS now
+        float winWidth = unityRect.width;
+        float winHeight = unityRect.height;
+        float screenW = screenBounds.width;
+        float screenH = screenBounds.height;
+
+        // CRITICAL: Avatar is in the CENTER of the window, so clamp CENTER position, not edges
+        float paddingX = Mathf.Max(100, winWidth / 8);
+        float paddingY = Mathf.Max(100, winHeight / 8);
+
+        // Calculate current window position in CG coords (top-left origin)
+        float currentX = unityRect.x;
+        float currentY = unityRect.y;
+        float centerX = currentX + winWidth / 2;
+        float centerY = currentY + winHeight / 2;
+
+        // Clamp CENTER to screen bounds with padding (in CG coords: 0,0 at top-left)
+        float clampedCenterX = Mathf.Clamp(centerX, paddingX, screenW - paddingX);
+        float clampedCenterY = Mathf.Clamp(centerY, paddingY, screenH - paddingY);
+
+        // Convert back to window position (top-left corner)
+        float clampedX = clampedCenterX - winWidth / 2;
+        float clampedY = clampedCenterY - winHeight / 2;
+
+        if (Mathf.Abs(clampedX - currentX) > 1 || Mathf.Abs(clampedY - currentY) > 1)
+        {
+            // Convert from CoreGraphics (top-left origin) to Cocoa (bottom-left origin)
+            // Both in POINTS, just flip Y
+            float cocoaX = clampedX;
+            float cocoaY = screenH - clampedY - winHeight;
+            Vector2 newPos = new Vector2(cocoaX, cocoaY);
+            UnityEngine.Debug.Log($"[AWH-macOS] EnsureWindowOnScreen: CG({clampedX:F0},{clampedY:F0}) -> Cocoa({cocoaX:F0},{cocoaY:F0})");
+            winController.windowPosition = newPos;
+        }
+        else
+        {
+            UnityEngine.Debug.Log($"[AWH-macOS] EnsureWindowOnScreen: Window already on screen at CG({currentX:F0},{currentY:F0})");
+        }
+#endif
+    }
+
     void SetTopMost(bool en)
     {
 #if UNITY_STANDALONE_WIN
@@ -901,7 +1490,7 @@ public class AvatarWindowHandler : MonoBehaviour
         // Credit: https://github.com/electron/electron/issues/10078
         // Credit: https://github.com/hillelkingqt/GeminiDesk/pull/58
         MacOSWindowHelper.EnableAlwaysOnTopOverFullscreen(en);
-        
+
         if (en)
         {
             // Start monitoring space changes to keep window visible when switching spaces
@@ -950,6 +1539,175 @@ public class AvatarWindowHandler : MonoBehaviour
         float worldRGuard = Vector3.Distance(w1, wg2a);
         Gizmos.color = probeGuardGizmoColor; Gizmos.DrawWireSphere(hip, worldRGuard);
     }
+
+    /// <summary>
+    /// Runtime debug visualization using GL rendering (works in builds, not just editor)
+    /// </summary>
+    void OnRenderObject()
+    {
+        if (!showDebugRects || targetCamera == null) return;
+        if (Camera.current != targetCamera) return;
+
+        EnsureDebugLineMaterial();
+        _debugLineMaterial.SetPass(0);
+
+        GL.PushMatrix();
+        GL.LoadPixelMatrix(0, targetCamera.pixelWidth, 0, targetCamera.pixelHeight);
+        GL.Begin(GL.LINES);
+
+        // Draw character position marker (small cross + rect at probe position)
+        if (_debugCharacterDesktopPos != Vector2.zero && _haveUnityCli)
+        {
+            Vector2 screenPos = DesktopToScreenPos(_debugCharacterDesktopPos);
+            float size = ScaledProbeRadiusF();
+            GL.Color(debugRectCharacterColor);
+            DrawRectGL(screenPos.x - size, screenPos.y - size, size * 2, size * 2);
+            // Draw crosshair
+            GL.Vertex3(screenPos.x - size * 1.5f, screenPos.y, 0);
+            GL.Vertex3(screenPos.x + size * 1.5f, screenPos.y, 0);
+            GL.Vertex3(screenPos.x, screenPos.y - size * 1.5f, 0);
+            GL.Vertex3(screenPos.x, screenPos.y + size * 1.5f, 0);
+        }
+
+        // Draw window snap zone rects (top edge areas of enumerated windows)
+        GL.Color(debugRectWindowSnapColor);
+        int spr = ScaledProbeRadiusI();
+        for (int i = 0; i < _debugWindowSnapRects.Count; i++)
+        {
+            Rect wr = _debugWindowSnapRects[i];
+            // Convert desktop rect to screen coords and draw the top edge snap zone
+            Vector2 tl = DesktopToScreenPos(new Vector2(wr.xMin, wr.yMin));
+            Vector2 tr = DesktopToScreenPos(new Vector2(wr.xMax, wr.yMin));
+            Vector2 bl = DesktopToScreenPos(new Vector2(wr.xMin, wr.yMin + spr));
+            Vector2 br = DesktopToScreenPos(new Vector2(wr.xMax, wr.yMin + spr));
+            // Draw the snap zone as a rectangle at the top of each window
+            GL.Vertex3(tl.x, tl.y, 0); GL.Vertex3(tr.x, tr.y, 0);
+            GL.Vertex3(tr.x, tr.y, 0); GL.Vertex3(br.x, br.y, 0);
+            GL.Vertex3(br.x, br.y, 0); GL.Vertex3(bl.x, bl.y, 0);
+            GL.Vertex3(bl.x, bl.y, 0); GL.Vertex3(tl.x, tl.y, 0);
+        }
+
+        // Draw snapped window rect (highlight the currently snapped window)
+        if (_debugSnappedWindowRect.width > 0 && _debugSnappedWindowRect.height > 0)
+        {
+            GL.Color(debugRectSnappedWindowColor);
+            Vector2 tl = DesktopToScreenPos(new Vector2(_debugSnappedWindowRect.xMin, _debugSnappedWindowRect.yMin));
+            Vector2 tr = DesktopToScreenPos(new Vector2(_debugSnappedWindowRect.xMax, _debugSnappedWindowRect.yMin));
+            Vector2 bl = DesktopToScreenPos(new Vector2(_debugSnappedWindowRect.xMin, _debugSnappedWindowRect.yMax));
+            Vector2 br = DesktopToScreenPos(new Vector2(_debugSnappedWindowRect.xMax, _debugSnappedWindowRect.yMax));
+            // Draw full window outline
+            GL.Vertex3(tl.x, tl.y, 0); GL.Vertex3(tr.x, tr.y, 0);
+            GL.Vertex3(tr.x, tr.y, 0); GL.Vertex3(br.x, br.y, 0);
+            GL.Vertex3(br.x, br.y, 0); GL.Vertex3(bl.x, bl.y, 0);
+            GL.Vertex3(bl.x, bl.y, 0); GL.Vertex3(tl.x, tl.y, 0);
+        }
+
+        GL.End();
+        GL.PopMatrix();
+    }
+
+    void DrawRectGL(float x, float y, float w, float h)
+    {
+        GL.Vertex3(x, y, 0); GL.Vertex3(x + w, y, 0);
+        GL.Vertex3(x + w, y, 0); GL.Vertex3(x + w, y + h, 0);
+        GL.Vertex3(x + w, y + h, 0); GL.Vertex3(x, y + h, 0);
+        GL.Vertex3(x, y + h, 0); GL.Vertex3(x, y, 0);
+    }
+
+    /// <summary>
+    /// Convert desktop coordinates (top-left origin) to Unity screen coordinates (bottom-left origin)
+    /// </summary>
+    Vector2 DesktopToScreenPos(Vector2 desktopPos)
+    {
+        if (!_haveUnityCli) return Vector2.zero;
+        
+        float clientW = Mathf.Max(1f, _lastUnityCli.Right - _lastUnityCli.Left);
+        float clientH = Mathf.Max(1f, _lastUnityCli.Bottom - _lastUnityCli.Top);
+        float pxW = Mathf.Max(1, targetCamera.pixelWidth);
+        float pxH = Mathf.Max(1, targetCamera.pixelHeight);
+
+        // Convert from desktop to Unity client-relative
+        float relX = (desktopPos.x - _lastUnityCli.Left) * (pxW / clientW);
+        float relY = (desktopPos.y - _lastUnityCli.Top) * (pxH / clientH);
+        
+        // Flip Y for Unity screen coords (bottom-left origin)
+        float screenY = pxH - relY;
+        
+        return new Vector2(relX, screenY);
+    }
+
+    void EnsureDebugLineMaterial()
+    {
+        if (_debugLineMaterial != null) return;
+        
+        Shader shader = Shader.Find("Hidden/Internal-Colored");
+        if (shader == null)
+        {
+            // Fallback to a simple unlit shader
+            shader = Shader.Find("Unlit/Color");
+        }
+        if (shader != null)
+        {
+            _debugLineMaterial = new Material(shader);
+            _debugLineMaterial.hideFlags = HideFlags.HideAndDontSave;
+            _debugLineMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            _debugLineMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            _debugLineMaterial.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Off);
+            _debugLineMaterial.SetInt("_ZWrite", 0);
+            _debugLineMaterial.SetInt("_ZTest", (int)UnityEngine.Rendering.CompareFunction.Always);
+        }
+    }
+
+    /// <summary>
+    /// Update debug visualization data. Call this when positions change.
+    /// </summary>
+    void UpdateDebugData(float charPx, float charPy, RECT? snappedRect = null)
+    {
+        if (!showDebugRects) return;
+        
+        _debugCharacterDesktopPos = new Vector2(charPx, charPy);
+        
+        if (snappedRect.HasValue)
+        {
+            var r = snappedRect.Value;
+            _debugSnappedWindowRect = new Rect(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
+        }
+        else
+        {
+            _debugSnappedWindowRect = Rect.zero;
+        }
+    }
+
+    /// <summary>
+    /// Update the list of window snap zones for debug visualization
+    /// </summary>
+    void UpdateDebugWindowRects()
+    {
+        if (!showDebugRects) return;
+        
+        _debugWindowSnapRects.Clear();
+        
+#if UNITY_STANDALONE_WIN
+        for (int i = 0; i < cachedWindows.Count; i++)
+        {
+            var win = cachedWindows[i];
+            if (win.hwnd == unityHWND) continue;
+            _debugWindowSnapRects.Add(new Rect(win.rect.Left, win.rect.Top, 
+                win.rect.Right - win.rect.Left, win.rect.Bottom - win.rect.Top));
+        }
+#elif UNITY_STANDALONE_OSX
+        if (_cachedMacOSWindows != null)
+        {
+            for (int i = 0; i < _cachedMacOSWindows.Length; i++)
+            {
+                var win = _cachedMacOSWindows[i];
+                if (!win.isValid) continue;
+                _debugWindowSnapRects.Add(new Rect(win.x, win.y, win.width, win.height));
+            }
+        }
+#endif
+    }
+
     public void SetBaseOffset(float v) { }
     public void SetBaseScale(float v) { }
     public float GetBaseOffset() => 0f; public float GetBaseScale() => 1f; public float GetScaleCompPx() => 0f;

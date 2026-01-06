@@ -97,6 +97,32 @@ public class PostBuildMacOSConfig
             Debug.LogError($"Failed to run post-build configuration: {ex.Message}");
         }
 
+        // Create entitlements to explicitly disable sandbox (important for window tracking)
+        try
+        {
+            string entitlementsPath = Path.Combine(appBundlePath, "Contents", "Resources", "app.entitlements");
+            string entitlementsDir = Path.GetDirectoryName(entitlementsPath);
+            if (!Directory.Exists(entitlementsDir)) Directory.CreateDirectory(entitlementsDir);
+
+            const string entitlementsContent = @"<?xml version=""1.0"" encoding=""UTF-8""?>
+<!DOCTYPE plist PUBLIC ""-//Apple//DTD PLIST 1.0//EN"" ""http://www.apple.com/DTDs/PropertyList-1.0.dtd"">
+<plist version=""1.0"">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+</dict>
+</plist>";
+
+            File.WriteAllText(entitlementsPath, entitlementsContent);
+            Debug.Log($"✓ Entitlements written to disable sandbox: {entitlementsPath}");
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"Failed to write entitlements: {ex.Message}");
+        }
+
         Debug.Log("=== Post-Build Configuration Complete ===");
     }
 }
