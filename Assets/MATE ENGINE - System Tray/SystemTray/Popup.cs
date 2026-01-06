@@ -42,9 +42,17 @@ namespace Utils
             if (!useSound)
                 notifyIconData.dwInfoFlags |= NIIF_NOSOUND;
 
+#if UNITY_STANDALONE_OSX
+            // Use native macOS notifications (NSUserNotification)
+            if (iconType != ToolTipIcon.None)
+            {
+               MacOSWindowHelper.ShowNotification(title, message);
+            }
+#elif UNITY_STANDALONE_WIN
             bool success = WinAPI.Shell_NotifyIcon(NIM_MODIFY, ref notifyIconData);
             if (!success)
                 Debug.LogError($"Shell_NotifyIcon Failed. Error: {Marshal.GetLastWin32Error()}");
+#endif
 
             notifyIconData.uFlags &= ~NIF_INFO;
             notifyIconData.dwInfoFlags = NIIF_NONE;

@@ -1,4 +1,6 @@
 using UnityEngine;
+using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 /// <summary>
@@ -112,6 +114,41 @@ public static class MacOSWindowHelper
     [DllImport("MacOSWindowHelper", EntryPoint = "MacOS_IsWindowVisible")]
     [return: MarshalAs(UnmanagedType.U1)]
     private static extern bool _IsWindowVisible(int windowNumber);
+
+    // ===================================================================================
+    // TRAY ICON IMPORTS
+    // ===================================================================================
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void TrayCallbackDelegate(int actionId);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MenuItemData
+    {
+        public string text;
+        public int id;
+    }
+
+    [DllImport("MacOSWindowHelper", EntryPoint = "MacOS_CreateTrayIcon")]
+    private static extern void _CreateTrayIcon(string tooltip, TrayCallbackDelegate callback);
+
+    [DllImport("MacOSWindowHelper", EntryPoint = "MacOS_SetTrayIconImage")]
+    private static extern void _SetTrayIconImage(IntPtr buffer, int length);
+
+    [DllImport("MacOSWindowHelper", EntryPoint = "MacOS_SetTrayTooltip")]
+    private static extern void _SetTrayTooltip(string tooltip);
+
+    [DllImport("MacOSWindowHelper", EntryPoint = "MacOS_DestroyTrayIcon")]
+    private static extern void _DestroyTrayIcon();
+
+    [DllImport("MacOSWindowHelper", EntryPoint = "MacOS_ShowTrayMenu")]
+    private static extern void _ShowTrayMenu(MenuItemData[] items, int count);
+    
+    [DllImport("MacOSWindowHelper", EntryPoint = "MacOS_ShowTrayMenuAtMouse")]
+    private static extern void _ShowTrayMenuAtMouse(MenuItemData[] items, int count);
+    
+    [DllImport("MacOSWindowHelper", EntryPoint = "MacOS_ShowNotification")]
+    private static extern void _ShowNotification(string title, string message);
 
     /// <summary>
     /// Enable or disable always-on-top behavior that works over fullscreen applications.
@@ -441,6 +478,67 @@ public static class MacOSWindowHelper
         }
     }
 
+    // ===================================================================================
+    // TRAY ICON HELPERS
+    // ===================================================================================
+
+    public static void CreateTrayIcon(string tooltip, TrayCallbackDelegate callback)
+    {
+        try
+        {
+            _CreateTrayIcon(tooltip, callback);
+        }
+        catch (System.Exception e) { Debug.LogWarning($"[MacOS] CreateTrayIcon failed: {e.Message}"); }
+    }
+
+    public static void SetTrayIconImage(byte[] pngData)
+    {
+        try
+        {
+            if (pngData == null || pngData.Length == 0) return;
+            // Pin data or use unsafe context?
+            // Actually, we can use Marshal.AllocHGlobal or just pass byte[] if DllImport supported it.
+            // But we defined it as IntPtr buffer.
+            
+            GCHandle pinnedArray = GCHandle.Alloc(pngData, GCHandleType.Pinned);
+            IntPtr pointer = pinnedArray.AddrOfPinnedObject();
+            _SetTrayIconImage(pointer, pngData.Length);
+            pinnedArray.Free();
+        }
+        catch (System.Exception e) { Debug.LogWarning($"[MacOS] SetTrayIconImage failed: {e.Message}"); }
+    }
+
+    public static void SetTrayTooltip(string tooltip)
+    {
+        try { _SetTrayTooltip(tooltip); } catch {}
+    }
+
+    public static void DestroyTrayIcon()
+    {
+        try { _DestroyTrayIcon(); } catch {}
+    }
+
+    public static void ShowTrayMenuAtMouse(List<(string text, int id)> items)
+    {
+        try
+        {
+            if (items == null || items.Count == 0) return;
+            MenuItemData[] data = new MenuItemData[items.Count];
+            for (int i=0; i<items.Count; i++)
+            {
+                data[i].text = items[i].text;
+                data[i].id = items[i].id;
+            }
+            _ShowTrayMenuAtMouse(data, items.Count);
+        }
+        catch (System.Exception e) { Debug.LogWarning($"[MacOS] ShowTrayMenuAtMouse failed: {e.Message}"); }
+    }
+
+    public static void ShowNotification(string title, string message)
+    {
+        try { _ShowNotification(title, message); } catch {}
+    }
+
 #else
     // Stub implementations for non-macOS platforms
     public const int NSNormalWindowLevel = 0;
@@ -549,5 +647,14 @@ public static class MacOSWindowHelper
     {
         return 1.0f;
     }
+    
+    // Stub implementations for Tray Icon on non-macOS
+    public delegate void TrayCallbackDelegate(int actionId);
+    public static void CreateTrayIcon(string tooltip, TrayCallbackDelegate callback) {}
+    public static void SetTrayIconImage(byte[] pngData) {}
+    public static void SetTrayTooltip(string tooltip) {}
+    public static void DestroyTrayIcon() {}
+    public static void ShowTrayMenuAtMouse(List<(string text, int id)> items) {}
+    public static void ShowNotification(string title, string message) {}
 #endif
 }

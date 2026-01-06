@@ -21,6 +21,8 @@ namespace Utils
         private static WndProcDelegate wndProcDelegate;
         public static Func<List<(string, Action)>> OnBuildMenu;
 
+        private static MacOSWindowHelper.TrayCallbackDelegate _macTrayDelegate; // Keep reference to prevent GC
+
 
         /// <summary>Create a System Tray Icon</summary>
         /// <param name="appName">An internal classifier (not visible)</param>
@@ -29,8 +31,8 @@ namespace Utils
         /// <param name="actions">List of menu items when clicking on the icon</param>
         public static void Init(string appName, string tooltip, Texture2D iconTexture, List<(string, Action)> actions = null)
         {
-#if !UNITY_STANDALONE_WIN
-            throw new NotImplementedException("These features are only avaliable on Windows...");
+#if !UNITY_STANDALONE_WIN && !UNITY_STANDALONE_OSX
+            throw new NotImplementedException("These features are only avaliable on Windows & macOS...");
 #endif
 
             if (_init)
@@ -60,6 +62,27 @@ namespace Utils
             // 0. Setup Environment
             windowClassName = appName;
             ProcessMenuActions(actions);
+
+#if UNITY_STANDALONE_OSX
+            // macOS Initialization
+            
+            // Create delegate and keep reference
+            _macTrayDelegate = new MacOSWindowHelper.TrayCallbackDelegate(OnMacTrayCallback);
+            
+            // Create native tray icon
+            MacOSWindowHelper.CreateTrayIcon(tooltip, _macTrayDelegate);
+            
+            // Set image
+            byte[] iconData = iconTexture.EncodeToPNG();
+            MacOSWindowHelper.SetTrayIconImage(iconData);
+            
+            _init = true;
+            Application.quitting += CleanupResources;
+            Debug.Log("Successfully added macOS Status Bar Item");
+            return;
+#endif
+
+            // Windows Initialization continues...
 
             // 1. Create HICON
             hIcon = CreateHIconFromTexture2D(ref iconTexture);
@@ -220,7 +243,10 @@ namespace Utils
 
                 case WM_COMMAND:
                     uint commandId = (uint)wParam & 0xFFFF;
-                    MenuActions[ActionMappings[commandId]]?.Invoke();
+                    if (ActionMappings.ContainsKey(commandId) && MenuActions.ContainsKey(ActionMappings[commandId]))
+                    {
+                        MenuActions[ActionMappings[commandId]]?.Invoke();
+                    }
                     return IntPtr.Zero;
 
                 default:
@@ -229,8 +255,77 @@ namespace Utils
             }
         }
 
+        private static void OnMacTrayCallback(int actionId)
+        {
+            if (actionId == 0) // Left Click
+            {
+                // macOS convention: show menu on any click
+                // If you want left-click to do a specific action, invoke OnLeftClick here instead
+                // For now, follow macOS convention and show the menu
+                ShowMacContextMenu();
+            }
+            else if (actionId == 1) // Right Click / Control+Click
+            {
+                ShowMacContextMenu();
+            }
+            else // Menu Item Selected (actionId matches item.tag)
+            {
+                // Find associated action
+                // Note: We need a reliable way to map ID back to Action.
+                // ActionMappings maps ID -> String Label
+                // MenuActions maps String Label -> Action
+                
+                if (ActionMappings != null && ActionMappings.ContainsKey((uint)actionId))
+                {
+                    string label = ActionMappings[(uint)actionId];
+                    if (MenuActions != null && MenuActions.ContainsKey(label))
+                    {
+                        MenuActions[label]?.Invoke();
+                    }
+                }
+            }
+        }
+        
+        private static void ShowMacContextMenu()
+        {
+            var menuEntries = OnBuildMenu != null ? OnBuildMenu() : null;
+            if (menuEntries == null) return;
+
+            // Rebuild mappings for this specific menu usage
+            // Note: This replaces the ones from Init, which is intended behavior (dynamic menu)
+            MenuActions = new Dictionary<string, Action>();
+            ActionMappings = new Dictionary<uint, string>();
+            uint commandId = 1000;
+            
+            var items = new List<(string, int)>();
+
+            foreach (var entry in menuEntries)
+            {
+                if (entry.Item1 == Utils.TrayIcon.SEPARATOR)
+                {
+                    items.Add((Utils.TrayIcon.SEPARATOR, 0));
+                }
+                else
+                {
+                    items.Add((entry.Item1, (int)commandId));
+                    MenuActions[entry.Item1] = entry.Item2;
+                    ActionMappings[commandId] = entry.Item1;
+                    commandId++;
+                }
+            }
+
+            MacOSWindowHelper.ShowTrayMenuAtMouse(items);
+        }
+
         private static void CleanupResources()
         {
+#if UNITY_STANDALONE_OSX
+            if (_init)
+            {
+                MacOSWindowHelper.DestroyTrayIcon();
+                _init = false;
+            }
+#elif UNITY_STANDALONE_WIN
             IntPtr hInstance = WinAPI.GetModuleHandle(null);
 
             if (_init && messageWindowHandle != IntPtr.Zero)
@@ -256,6 +351,7 @@ namespace Utils
                 WinAPI.UnregisterClass(windowClassName, hInstance);
 
             wndProcDelegate = null;
+#endif
 
 #if UNITY_EDITOR
             Debug.Log("Cleaned up resources for System Tray Icon");
