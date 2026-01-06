@@ -15,6 +15,14 @@ public class MoveToPrimaryScreen : MonoBehaviour
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    private const uint MONITOR_DEFAULTTOPRIMARY = 1;
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT
     {
@@ -22,6 +30,15 @@ public class MoveToPrimaryScreen : MonoBehaviour
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct MONITORINFO
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public int dwFlags;
     }
 
     void Start()
@@ -38,11 +55,16 @@ public class MoveToPrimaryScreen : MonoBehaviour
         int currentWidth = rect.Right - rect.Left;
         int currentHeight = rect.Bottom - rect.Top;
 
-        var screen = System.Windows.Forms.Screen.PrimaryScreen;
-        var bounds = screen.Bounds;
+        var monitor = MonitorFromWindow(unityHWND, MONITOR_DEFAULTTOPRIMARY);
+        var info = new MONITORINFO { cbSize = Marshal.SizeOf(typeof(MONITORINFO)) };
+        if (!GetMonitorInfo(monitor, ref info))
+        {
+            Debug.LogWarning("[MoveToPrimaryScreen] GetMonitorInfo failed; falling back to current window position");
+            return;
+        }
 
-        int x = bounds.Left + (bounds.Width - currentWidth) / 2;
-        int y = bounds.Top + (bounds.Height - currentHeight) / 2;
+        int x = info.rcMonitor.Left + (info.rcMonitor.Right - info.rcMonitor.Left - currentWidth) / 2;
+        int y = info.rcMonitor.Top + (info.rcMonitor.Bottom - info.rcMonitor.Top - currentHeight) / 2;
 
         MoveWindow(unityHWND, x, y, currentWidth, currentHeight, true);
 
