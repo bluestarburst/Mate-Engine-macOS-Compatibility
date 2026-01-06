@@ -826,6 +826,11 @@ public class AvatarWindowHandler : MonoBehaviour
 
             _guard = Mathf.Max(1, snapGuardFrames);
             _latch = Mathf.Max(1, snapLatchFrames);
+            
+            // Store cursor Y for vertical unsnap detection (like Windows)
+            Vector2 cursorPos = Kirurobo.UniWindowController.GetCursorPosition();
+            _snapCursorY = (int)cursorPos.y;
+            UnityEngine.Debug.Log($"[AWH-macOS] TrySnap: Stored _snapCursorY={_snapCursorY}");
 
             _snapSmoothingActive = enableSnapSmoothing;
             _snapVelX = _snapVelY = 0f;
@@ -1134,7 +1139,42 @@ public class AvatarWindowHandler : MonoBehaviour
         }
         return false;
 #elif UNITY_STANDALONE_OSX
-        // macOS: Always consider the window still nearby while snapped (continuous tracking via active window)
+        // macOS: Check if character is still near the snapped window (mirror Windows logic)
+        if (_latch > 0) { _latch--; return true; }
+        if (_guard > 0) { _guard--; return true; }
+
+        // Get the snapped window's current bounds
+        if (_snappedWindowNumber <= 0) return false;
+        var winInfo = MacOSWindowHelper.GetWindowByNumber(_snappedWindowNumber);
+        if (!winInfo.isValid) return false;
+
+        if (!ComputeZoneDesktop(out float px, out float py)) return true;
+        
+        int left = (int)winInfo.x;
+        int right = (int)(winInfo.x + winInfo.width);
+        int top = (int)winInfo.y;
+        
+        bool hitHoriz = px >= left && px <= right;
+        bool hitVert = Mathf.Abs(py - top) <= Mathf.Max(unsnapVerticalBand, ScaledProbeRadiusI());
+        
+        if (!hitHoriz || !hitVert)
+        {
+            UnityEngine.Debug.Log($"[AWH-macOS] IsStillNearSnappedWindow: UNSNAPPING! hitH={hitHoriz} hitV={hitVert} px={px:F0} py={py:F0} L={left} R={right} T={top}");
+            return false;
+        }
+        
+        // Additional vertical check using cursor position (like Windows)
+        if (controller.isDragging && animator.GetBool("isWindowSit"))
+        {
+            Vector2 cursorPos = Kirurobo.UniWindowController.GetCursorPosition();
+            int vBand = Mathf.Max(unsnapVerticalBand, ScaledProbeRadiusI());
+            if (Mathf.Abs(cursorPos.y - _snapCursorY) > vBand)
+            {
+                UnityEngine.Debug.Log($"[AWH-macOS] IsStillNearSnappedWindow: VERTICAL UNSNAP! cursorY={cursorPos.y:F0} snapY={_snapCursorY} vBand={vBand}");
+                return false;
+            }
+        }
+        
         return true;
 #else
         return false;
@@ -1515,8 +1555,8 @@ public class AvatarWindowHandler : MonoBehaviour
         }
 
         // Clamp CHARACTER position to monitor bounds (with padding)
-        float paddingX = 100f;
-        float paddingY = 100f;
+        float paddingX = -10f;
+        float paddingY = -100f;
 
         float clampedCharX = Mathf.Clamp(charX, monitorRectCG.xMin + paddingX, monitorRectCG.xMax - paddingX);
         float clampedCharY = Mathf.Clamp(charY, monitorRectCG.yMin + paddingY, monitorRectCG.yMax - paddingY);
