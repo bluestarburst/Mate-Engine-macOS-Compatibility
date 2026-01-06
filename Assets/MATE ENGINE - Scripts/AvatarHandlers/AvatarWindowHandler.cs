@@ -138,6 +138,8 @@ public class AvatarWindowHandler : MonoBehaviour
     Vector2 _debugCharacterDesktopPos;
     Rect _debugSnappedWindowRect;
     readonly List<Rect> _debugWindowSnapRects = new List<Rect>(32);
+    bool _cachedTopMost = false; // To prevent redundant OS calls
+
     Material _debugLineMaterial;
     static readonly int DeltaPanicThreshold = 10000;
     void Start()
@@ -182,9 +184,49 @@ public class AvatarWindowHandler : MonoBehaviour
         cachedWindows.Capacity = Mathf.Max(cachedWindows.Capacity, 128);
         activeOccluders.Capacity = Mathf.Max(activeOccluders.Capacity, maxOtherQuads);
 
+        // macOS: Ensure window size matches screen size on startup
+#if UNITY_STANDALONE_OSX
+        ResizeWindowToScreen();
+#endif
+
         // Ensure Unity window starts on screen
         EnsureWindowOnScreen();
     }
+
+#if UNITY_STANDALONE_OSX
+    void ResizeWindowToScreen()
+    {
+        var winController = Kirurobo.UniWindowController.current;
+        if (winController == null) return;
+
+        // Get screen bounds in points
+        var screenBounds = MacOSWindowHelper.GetScreenBounds();
+        if (!screenBounds.isValid) return;
+
+        float screenWidth = screenBounds.width;
+        float screenHeight = screenBounds.height;
+
+        // Get backing scale for pixel conversion
+        float backingScale = MacOSWindowHelper.GetUnityBackingScale();
+        if (backingScale <= 0f) backingScale = 2f;
+
+        // Current window size in pixels
+        Vector2 winSizePixels = winController.windowSize;
+        float winWidthPts = winSizePixels.x / backingScale;
+        float winHeightPts = winSizePixels.y / backingScale;
+
+        // Only resize if window is larger than screen
+        if (winWidthPts > screenWidth || winHeightPts > screenHeight)
+        {
+            // Set window to screen size (in pixels for UniWindowController)
+            float newWidthPx = screenWidth * backingScale;
+            float newHeightPx = screenHeight * backingScale;
+            
+            UnityEngine.Debug.Log($"[AWH-macOS] ResizeWindowToScreen: Window ({winSizePixels.x}x{winSizePixels.y}px = {winWidthPts:F0}x{winHeightPts:F0}pts) > Screen ({screenWidth}x{screenHeight}pts). Resizing to {newWidthPx}x{newHeightPx}px");
+            winController.windowSize = new Vector2(newWidthPx, newHeightPx);
+        }
+    }
+#endif
     void OnDisable()
     {
         ClearSnapAndHide();
@@ -441,6 +483,12 @@ public class AvatarWindowHandler : MonoBehaviour
             }
         }
         wasDragging = controller.isDragging;
+
+#if UNITY_STANDALONE_OSX
+        // Periodically ensure window is on screen (fixes space switch offset)
+        // BUT skip if dragging so we don't fight the user (Step 264 fix)
+        if (!controller.isDragging && Time.frameCount % 60 == 0) EnsureWindowOnScreen();
+#endif
 #endif
     }
     void LateUpdate() { UpdateOccluderQuadsFrameSync(); }
@@ -911,8 +959,12 @@ public class AvatarWindowHandler : MonoBehaviour
             float ww = Mathf.Max(1, tr.Right - tr.Left);
             snapFraction = Mathf.Clamp01((px - tr.Left) / ww);
         }
-        PinToTarget(tr);
-        SetTopMost(true);
+        // Allow unsnapping: If dragging, do not force position logic
+        if (!dragging)
+        {
+            PinToTarget(tr);
+            SetTopMost(true);
+        }
 #endif
     }
     void PinToTarget(RECT r)
@@ -920,7 +972,7 @@ public class AvatarWindowHandler : MonoBehaviour
         if (!ComputeSeatDesktop(out float px, out float py)) return;
         int left = r.Left, right = r.Right, top = r.Top;
         float desiredPX = left + snapFraction * Mathf.Max(1, right - left);
-        float desiredPY = top + seatOffsetPx;
+        float desiredPY = top - seatOffsetPx;
         int dx = Mathf.RoundToInt(desiredPX - px);
         int dy = Mathf.RoundToInt(desiredPY - py);
 
@@ -964,7 +1016,7 @@ public class AvatarWindowHandler : MonoBehaviour
         if (Mathf.Abs(targetX - nx) <= 1 && Mathf.Abs(targetY - ny) <= 1) { nx = targetX; ny = targetY; _snapSmoothingActive = false; _snapVelX = _snapVelY = 0f; }
         if (nx != ur.Left || ny != ur.Top) MoveWindow(unityHWND, nx, ny, w, h, true);
 #elif UNITY_STANDALONE_OSX
-        // macOS: All coordinates are now in POINTS (CGWindowList uses points, not device pixels)
+        // macOS: Use UniWindowController for current position to avoid lag from OS APIs
         var winController = Kirurobo.UniWindowController.current;
         if (winController == null)
         {
@@ -972,93 +1024,87 @@ public class AvatarWindowHandler : MonoBehaviour
             return;
         }
 
-        // Get Unity window position in CoreGraphics coordinates (top-left origin, POINTS)
-        var unityRect = MacOSWindowHelper.GetUnityWindowBounds();
-        if (!unityRect.isValid)
-        {
-            UnityEngine.Debug.LogError("[AWH-macOS] PinToTarget: unity rect invalid");
-            return;
-        }
+        // Get screen bounds first - needed for coordinate conversions
+        var screenBounds = MacOSWindowHelper.GetScreenBounds();
+        float screenHeight = screenBounds.isValid ? screenBounds.height : 1117f;
 
-        float curX = unityRect.x;  // Current X in CG points
-        float curY = unityRect.y;  // Current Y in CG points (top-left origin)
-        float winWidth = unityRect.width;
-        float winHeight = unityRect.height;
+        // Get CURRENT window position and size from UniWindowController (Cocoa / Bottom-Left)
+        // This is much faster and synchronous compared to MacOSWindowHelper.GetUnityWindowBounds()
+        Vector2 cocoaPos = winController.windowPosition;
+        Vector2 winSize = winController.windowSize;
+        float winHeight = winSize.y;
 
-        // dx, dy are in POINTS (from ComputeDesktopFromWorld which now uses points)
-        // But wait - dx/dy come from the RECT which uses device pixels from CGWindowList
-        // Actually CGWindowList returns points, so dx/dy should be in points now too
+        // Convert CURRENT position to CoreGraphics (Top-Left) for consistency with calculations
+        // CG_Y = ScreenHeight - Cocoa_Y - WindowHeight
+        float curX = cocoaPos.x;
+        float curY = screenHeight - cocoaPos.y - winHeight;
+
+        // Calculate TARGET position in CoreGraphics (Top-Left)
+        // dx, dy are calculated in Desktop space (which matches CG space on macOS)
         float targetX = curX + dx;
         float targetY = curY + dy;
 
-        UnityEngine.Debug.Log($"[AWH-macOS] PinToTarget: cur=({curX:F0},{curY:F0}) delta=({dx},{dy}) target=({targetX:F0},{targetY:F0})");
+        UnityEngine.Debug.Log($"[AWH-macOS] PinToTarget: curCG=({curX:F0},{curY:F0}) cocoa=({cocoaPos.x:F0},{cocoaPos.y:F0}) delta=({dx},{dy}) targetCG=({targetX:F0},{targetY:F0})");
 
-        // Get screen height for coordinate conversion (CG to Cocoa)
-        // NOTE: We do NOT clamp here to match Windows behavior - the window follows the target
-        // exactly like Windows does. EnsureWindowOnScreen handles keeping it visible separately.
-        var screenBounds = MacOSWindowHelper.GetScreenBounds();
-        float screenHeight = screenBounds.isValid ? screenBounds.height : 1117f; // fallback
+        // Tolerance to avoid sub-pixel flickering (slightly increased for stability)
+        const float moveTolerance = 1.0f;
 
-        // Tolerance to avoid sub-pixel flickering from coordinate rounding
-        const float moveTolerance = 2f; // Don't move for sub-2-point differences
+        Vector2 nextPosCG = new Vector2(targetX, targetY);
+        bool shouldMove = false;
 
-        if (!_snapSmoothingActive || !enableSnapSmoothing)
+        // Apply smoothing if enabled
+        if (_snapSmoothingActive && enableSnapSmoothing)
         {
-            // Check if the target is actually different from current position
+            float dt = Time.unscaledDeltaTime;
+            // Smooth in CG space (Top-Left)
+            float nextX = Mathf.SmoothDamp(curX, targetX, ref _snapVelX, snapSmoothingTime, snapSmoothingMaxSpeed, dt);
+            float nextY = Mathf.SmoothDamp(curY, targetY, ref _snapVelY, snapSmoothingTime, snapSmoothingMaxSpeed, dt);
+            
+            // Seat offset prediction logic (same as Windows)
+            if (controller != null && controller.isDragging)
+            {
+                // Note: on macOS curY is Top-Left, so logic is similar to Windows (Top-Left)
+                float predictedSeatY = py + (nextY - curY);
+                float afterError = predictedSeatY - desiredPY;
+                if (afterError > 0f)
+                {
+                    float maxStep = snapSmoothingMaxSpeed * dt;
+                    float need = Mathf.Max(0f, afterError - 1f);
+                    nextY -= Mathf.Min(maxStep, need);
+                }
+            }
+
+            // Snap to target if very close
+            if (Mathf.Abs(targetX - nextX) <= 1f && Mathf.Abs(targetY - nextY) <= 1f) 
+            { 
+                 nextX = targetX; 
+                 nextY = targetY; 
+                 _snapSmoothingActive = false; 
+                 _snapVelX = _snapVelY = 0f; 
+            }
+            
+            nextPosCG = new Vector2(nextX, nextY);
+            shouldMove = (Mathf.Abs(nextX - curX) > 0.5f || Mathf.Abs(nextY - curY) > 0.5f);
+        }
+        else
+        {
+            // Direct move check
             float actualDeltaX = targetX - curX;
             float actualDeltaY = targetY - curY;
-
-            if (Mathf.Abs(actualDeltaX) > moveTolerance || Mathf.Abs(actualDeltaY) > moveTolerance)
-            {
-                // Convert from CoreGraphics (top-left origin) to Cocoa (bottom-left origin)
-                // Both are in POINTS now, just need to flip Y
-                // Cocoa Y = screenHeight - CG_Y - windowHeight
-                float cocoaX = targetX;
-                float cocoaY = screenHeight - targetY - winHeight;
-                Vector2 newPos = new Vector2(cocoaX, cocoaY);
-                UnityEngine.Debug.Log($"[AWH-macOS] PinToTarget MOVE: CG({targetX:F0},{targetY:F0}) -> Cocoa({cocoaX:F0},{cocoaY:F0}) actualDelta=({actualDeltaX:F1},{actualDeltaY:F1})");
-                winController.windowPosition = newPos;
-            }
-            return;
+            shouldMove = (Mathf.Abs(actualDeltaX) > moveTolerance || Mathf.Abs(actualDeltaY) > moveTolerance);
         }
 
-        float dt = Time.unscaledDeltaTime;
-        float nextX = Mathf.SmoothDamp(curX, targetX, ref _snapVelX, snapSmoothingTime, snapSmoothingMaxSpeed, dt);
-        float nextY = Mathf.SmoothDamp(curY, targetY, ref _snapVelY, snapSmoothingTime, snapSmoothingMaxSpeed, dt);
-
-        if (controller != null && this.controller.isDragging)
+        if (shouldMove)
         {
-            float predictedSeatY = py + (nextY - curY);
-            float afterError = predictedSeatY - desiredPY;
-            if (afterError > 0f)
-            {
-                float maxStep = snapSmoothingMaxSpeed * dt;
-                float need = Mathf.Max(0f, afterError - 1f);
-                nextY -= Mathf.Min(maxStep, need);
-            }
+            // Convert RESULT from CoreGraphics (Top-Left) back to Cocoa (Bottom-Left) for UniWindowController
+            // Cocoa_Y = ScreenHeight - CG_Y - WindowHeight
+            float newCocoaX = nextPosCG.x;
+            float newCocoaY = screenHeight - nextPosCG.y - winHeight;
+            
+            winController.windowPosition = new Vector2(newCocoaX, newCocoaY);
         }
 
-        // NOTE: No clamping here to match Windows behavior - follow the target exactly
 
-        if (Mathf.Abs(targetX - nextX) <= 1 && Mathf.Abs(targetY - nextY) <= 1)
-        {
-            nextX = targetX;
-            nextY = targetY;
-            _snapSmoothingActive = false;
-            _snapVelX = _snapVelY = 0f;
-        }
-
-        // Use same tolerance as non-smoothing branch to prevent sub-pixel flickering
-        if (Mathf.Abs(nextX - curX) > moveTolerance || Mathf.Abs(nextY - curY) > moveTolerance)
-        {
-            // Convert from CoreGraphics (top-left origin) to Cocoa (bottom-left origin)
-            // Both in POINTS, just flip Y
-            float cocoaX = nextX;
-            float cocoaY = screenHeight - nextY - winHeight;
-            Vector2 newPos = new Vector2(cocoaX, cocoaY);
-            UnityEngine.Debug.Log($"[AWH-macOS] PinToTarget SMOOTH: CG({nextX:F0},{nextY:F0}) -> Cocoa({cocoaX:F0},{cocoaY:F0})");
-            winController.windowPosition = newPos;
-        }
 #endif
     }
     bool IsStillNearSnappedWindow()
@@ -1369,8 +1415,32 @@ public class AvatarWindowHandler : MonoBehaviour
         r.Left = p.X; r.Top = p.Y; r.Right = p.X + client.Right; r.Bottom = p.Y + client.Bottom;
         return true;
 #elif UNITY_STANDALONE_OSX
-        // On macOS, get the Unity window bounds from the native code using the same coordinate system
-        // as the active window detection (CoreGraphics: top-left origin, Y increases downward)
+        // macOS: Use UniWindowController for synchronous window bounds to avoid lag
+        // This is CRITICAL for preventing the "teleporting" flickering loop
+        var winController = Kirurobo.UniWindowController.current;
+        if (winController != null) 
+        {
+             // Get screen bounds for conversion
+             var screenBounds = MacOSWindowHelper.GetScreenBounds();
+             float screenHeight = screenBounds.isValid ? screenBounds.height : 1117f;
+
+             // UniWindowController uses Cocoa coordinates (Bottom-Left)
+             Vector2 cocoaPos = winController.windowPosition;
+             Vector2 winSize = winController.windowSize;
+             
+             // Convert Cocoa (Bottom-Left) to CoreGraphics (Top-Left)
+             // CG_Y = ScreenHeight - Cocoa_Y - WindowHeight
+             float cgX = cocoaPos.x;
+             float cgY = screenHeight - cocoaPos.y - winSize.y;
+             
+             r.Left = (int)cgX;
+             r.Top = (int)cgY;
+             r.Right = (int)(cgX + winSize.x);
+             r.Bottom = (int)(cgY + winSize.y);
+             return true;
+        }
+
+        // Fallback to legacy if UniWindowController is missing (should not happen)
         var boundsResult = MacOSWindowHelper.GetUnityWindowBounds();
         if (!boundsResult.isValid)
         {
@@ -1418,74 +1488,103 @@ public class AvatarWindowHandler : MonoBehaviour
             MoveWindow(unityHWND, clampedX, clampedY, windowWidth, windowHeight, true);
         }
 #elif UNITY_STANDALONE_OSX
-        // macOS: All coordinates are now in POINTS (CGWindowList uses points, not device pixels)
+        // macOS: Use CHARACTER position (not window center) for on-screen check
         var winController = Kirurobo.UniWindowController.current;
-        if (winController == null)
-        {
-            UnityEngine.Debug.LogWarning("[AWH-macOS] EnsureWindowOnScreen: No UniWindowController");
-            return;
-        }
+        if (winController == null) return;
 
-        var unityRect = MacOSWindowHelper.GetUnityWindowBounds();
-        if (!unityRect.isValid)
-        {
-            UnityEngine.Debug.LogWarning("[AWH-macOS] EnsureWindowOnScreen: Unity window bounds invalid");
-            return;
-        }
+        // Get CHARACTER position in desktop/CG coordinates using same method as PinToTarget
+        if (!ComputeSeatDesktop(out float charX, out float charY)) return;
 
+        // Get screen bounds  
         var screenBounds = MacOSWindowHelper.GetScreenBounds();
-        if (!screenBounds.isValid)
+        float screenHeight = screenBounds.isValid ? screenBounds.height : 1117f;
+
+        // Find best monitor for this character position (CG coordinates)
+        int monitorIndex = GetBestMonitorIndex(new Vector2(charX, charY));
+        
+        // Get monitor bounds (CG coordinates)
+        Rect monitorRectCG = Kirurobo.UniWindowController.GetMonitorRect(monitorIndex);
+        if (monitorRectCG.width <= 0f || monitorRectCG.height <= 0f)
         {
-            UnityEngine.Debug.LogWarning("[AWH-macOS] EnsureWindowOnScreen: Screen bounds invalid");
-            return;
+            monitorRectCG = new Rect(
+                screenBounds.isValid ? screenBounds.x : 0f, 
+                screenBounds.isValid ? screenBounds.y : 0f, 
+                screenBounds.isValid ? screenBounds.width : 2560f, 
+                screenBounds.isValid ? screenBounds.height : 1440f
+            );
         }
 
-        // All values in POINTS now
-        float winWidth = unityRect.width;
-        float winHeight = unityRect.height;
-        float screenW = screenBounds.width;
-        float screenH = screenBounds.height;
+        // Clamp CHARACTER position to monitor bounds (with padding)
+        float paddingX = 100f;
+        float paddingY = 100f;
 
-        // CRITICAL: Avatar is in the CENTER of the window, so clamp CENTER position, not edges
-        float paddingX = Mathf.Max(100, winWidth / 8);
-        float paddingY = Mathf.Max(100, winHeight / 8);
+        float clampedCharX = Mathf.Clamp(charX, monitorRectCG.xMin + paddingX, monitorRectCG.xMax - paddingX);
+        float clampedCharY = Mathf.Clamp(charY, monitorRectCG.yMin + paddingY, monitorRectCG.yMax - paddingY);
 
-        // Calculate current window position in CG coords (top-left origin)
-        float currentX = unityRect.x;
-        float currentY = unityRect.y;
-        float centerX = currentX + winWidth / 2;
-        float centerY = currentY + winHeight / 2;
+        // Calculate how much the character needs to move
+        float deltaX = clampedCharX - charX;
+        float deltaY = clampedCharY - charY;
 
-        // Clamp CENTER to screen bounds with padding (in CG coords: 0,0 at top-left)
-        float clampedCenterX = Mathf.Clamp(centerX, paddingX, screenW - paddingX);
-        float clampedCenterY = Mathf.Clamp(centerY, paddingY, screenH - paddingY);
-
-        // Convert back to window position (top-left corner)
-        float clampedX = clampedCenterX - winWidth / 2;
-        float clampedY = clampedCenterY - winHeight / 2;
-
-        if (Mathf.Abs(clampedX - currentX) > 1 || Mathf.Abs(clampedY - currentY) > 1)
+        if (Mathf.Abs(deltaX) > 1 || Mathf.Abs(deltaY) > 1)
         {
-            // Convert from CoreGraphics (top-left origin) to Cocoa (bottom-left origin)
-            // Both in POINTS, just flip Y
-            float cocoaX = clampedX;
-            float cocoaY = screenH - clampedY - winHeight;
-            Vector2 newPos = new Vector2(cocoaX, cocoaY);
-            UnityEngine.Debug.Log($"[AWH-macOS] EnsureWindowOnScreen: CG({clampedX:F0},{clampedY:F0}) -> Cocoa({cocoaX:F0},{cocoaY:F0})");
-            winController.windowPosition = newPos;
-        }
-        else
-        {
-            UnityEngine.Debug.Log($"[AWH-macOS] EnsureWindowOnScreen: Window already on screen at CG({currentX:F0},{currentY:F0})");
+            // Get current window position in Cocoa
+            Vector2 cocoaPos = winController.windowPosition;
+            
+            // Move window by the same delta (but in Cocoa space - Y is inverted)
+            // In CG: positive Y is down, in Cocoa: positive Y is up
+            float newCocoaX = cocoaPos.x + deltaX;
+            float newCocoaY = cocoaPos.y - deltaY; // Invert deltaY for Cocoa
+
+            UnityEngine.Debug.Log($"[AWH-macOS] EnsureWindowOnScreen: char=({charX:F0},{charY:F0}) -> clamped=({clampedCharX:F0},{clampedCharY:F0}) delta=({deltaX:F0},{deltaY:F0}) Cocoa({cocoaPos.x:F0},{cocoaPos.y:F0}) -> ({newCocoaX:F0},{newCocoaY:F0})");
+            winController.windowPosition = new Vector2(newCocoaX, newCocoaY);
         }
 #endif
     }
+
+#if UNITY_STANDALONE_OSX
+    // Monitor finder using CG coordinates
+    int GetBestMonitorIndex(Vector2 pointCG)
+    {
+        int monitorCount = Kirurobo.UniWindowController.GetMonitorCount();
+        if (monitorCount <= 0) return 0;
+
+        // First pass: check containment
+        for (int i = 0; i < monitorCount; i++)
+        {
+            Rect monitorRect = Kirurobo.UniWindowController.GetMonitorRect(i);
+            if (monitorRect.width <= 0f || monitorRect.height <= 0f) continue;
+            if (monitorRect.Contains(pointCG)) return i;
+        }
+        
+        // Second pass: find closest monitor
+        int bestIndex = 0;
+        float minDistSq = float.MaxValue;
+        for (int i = 0; i < monitorCount; i++)
+        {
+            Rect mr = Kirurobo.UniWindowController.GetMonitorRect(i);
+            if (mr.width <= 0f) continue;
+             
+            // Box distance
+            float dx = Mathf.Max(0, Mathf.Abs(pointCG.x - mr.center.x) - mr.width/2);
+            float dy = Mathf.Max(0, Mathf.Abs(pointCG.y - mr.center.y) - mr.height/2);
+            float dSq = dx*dx + dy*dy;
+             
+            if (dSq < minDistSq) { minDistSq = dSq; bestIndex = i; }
+        }
+
+        return bestIndex;
+    }
+#endif
 
     void SetTopMost(bool en)
     {
 #if UNITY_STANDALONE_WIN
         SetWindowPos(unityHWND, en ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 #elif UNITY_STANDALONE_OSX
+        // Prevent redundant calls to avoid flickering/performance hit
+        if (_cachedTopMost == en) return;
+        _cachedTopMost = en;
+
         // On macOS, use the special helper that can appear above fullscreen apps
         // Credit: https://github.com/electron/electron/issues/10078
         // Credit: https://github.com/hillelkingqt/GeminiDesk/pull/58
@@ -1495,7 +1594,7 @@ public class AvatarWindowHandler : MonoBehaviour
         {
             // Start monitoring space changes to keep window visible when switching spaces
             MacOSWindowHelper.StartMonitoringSpaceChanges();
-            // Bring window to front to ensure it's visible
+            // Bring window to front to ensure it's visible (Only do this ONCE when enabling)
             MacOSWindowHelper.BringToFront();
         }
         else
